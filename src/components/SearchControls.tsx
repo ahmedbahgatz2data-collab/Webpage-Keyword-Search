@@ -1,5 +1,21 @@
-import React, { useState } from 'react';
-import { Search, Plus, Trash2, SlidersHorizontal, Globe, KeyRound, RefreshCw, Layers, Check, Link2, Sparkles, Code2, ListPlus } from 'lucide-react';
+import React, { useState, useRef } from 'react';
+import {
+  Search,
+  Plus,
+  Trash2,
+  SlidersHorizontal,
+  Globe,
+  KeyRound,
+  RefreshCw,
+  Check,
+  Link2,
+  Code2,
+  ListPlus,
+  UploadCloud,
+  FileText,
+  Download,
+  AlertCircle
+} from 'lucide-react';
 import { SearchOptions, PresetSample } from '../types';
 import { SAMPLE_PRESETS } from '../data/presets';
 
@@ -39,6 +55,10 @@ export const SearchControls: React.FC<SearchControlsProps> = ({
 
   const [bulkMappedText, setBulkMappedText] = useState<string>('');
   const [showBulkText, setShowBulkText] = useState<boolean>(false);
+  const [showFileUpload, setShowFileUpload] = useState<boolean>(false);
+  const [importStatus, setImportStatus] = useState<string | null>(null);
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Global State
   const [urlsText, setUrlsText] = useState<string>(
@@ -118,48 +138,130 @@ export const SearchControls: React.FC<SearchControlsProps> = ({
     );
   };
 
-  // Parse Bulk Mapped Text (format: URL | kw1, kw2)
-  const handleParseBulkMappedText = () => {
-    if (!bulkMappedText.trim()) return;
-
-    const lines = bulkMappedText.split('\n');
-    const newTargets: UrlTargetItem[] = [];
+  // Parse Raw Text (Supports Column 1 = URL, Column 2 = Keywords)
+  const parseRawTextContent = (rawText: string): UrlTargetItem[] => {
+    const lines = rawText.split(/\r?\n/);
+    const parsedTargets: UrlTargetItem[] = [];
 
     lines.forEach((line, idx) => {
       const trimmed = line.trim();
-      if (!trimmed) return;
+      if (!trimmed || trimmed.startsWith('#')) return; // ignore comments/empty
 
-      // Split by pipe | or -> or comma
-      let parts: string[] = [];
-      if (trimmed.includes('|')) {
-        parts = trimmed.split('|');
+      let url = '';
+      let kwString = '';
+
+      // Check delimiters in order: Tab (\t), Pipe (|), Semicolon (;), Comma (,), or Arrow (->)
+      if (trimmed.includes('\t')) {
+        const parts = trimmed.split('\t');
+        url = parts[0].trim();
+        kwString = parts.slice(1).join(' ').trim();
+      } else if (trimmed.includes('|')) {
+        const parts = trimmed.split('|');
+        url = parts[0].trim();
+        kwString = parts.slice(1).join(' ').trim();
       } else if (trimmed.includes('->')) {
-        parts = trimmed.split('->');
+        const parts = trimmed.split('->');
+        url = parts[0].trim();
+        kwString = parts.slice(1).join(' ').trim();
+      } else if (trimmed.includes(';')) {
+        const parts = trimmed.split(';');
+        url = parts[0].trim();
+        kwString = parts.slice(1).join(' ').trim();
+      } else if (trimmed.includes(',')) {
+        // Handle CSV style: url, kw1 kw2 OR url, "kw1, kw2"
+        const firstCommaIndex = trimmed.indexOf(',');
+        url = trimmed.substring(0, firstCommaIndex).trim();
+        kwString = trimmed.substring(firstCommaIndex + 1).replace(/^["']|["']$/g, '').trim();
       } else {
-        parts = [trimmed, ''];
+        // Space separated if URL starts with http
+        const spaceIndex = trimmed.search(/\s/);
+        if (spaceIndex !== -1) {
+          url = trimmed.substring(0, spaceIndex).trim();
+          kwString = trimmed.substring(spaceIndex + 1).trim();
+        } else {
+          url = trimmed;
+          kwString = '';
+        }
       }
 
-      const url = parts[0].trim();
-      const kwString = parts.slice(1).join(' ').trim();
+      // Format keywords from string (comma, semicolon or slash separated)
       const kws = kwString
-        ? kwString.split(',').map(k => k.trim()).filter(k => k.length > 0)
+        ? kwString
+            .split(/[,;/]+/)
+            .map(k => k.trim())
+            .filter(k => k.length > 0)
         : [];
 
       if (url) {
-        newTargets.push({
-          id: `bulk-${Date.now()}-${idx}`,
+        parsedTargets.push({
+          id: `file-target-${Date.now()}-${idx}`,
           url,
           keywords: kws
         });
       }
     });
 
-    if (newTargets.length > 0) {
-      setTargets(newTargets);
+    return parsedTargets;
+  };
+
+  // Handle File Upload (.txt, .csv, .tsv)
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      const content = evt.target?.result as string;
+      if (content) {
+        const parsed = parseRawTextContent(content);
+        if (parsed.length > 0) {
+          setTargets(parsed);
+          setImportStatus(`Successfully imported ${parsed.length} target URLs with mapped keywords from ${file.name}`);
+          setShowFileUpload(false);
+          setSelectedPresetId(null);
+        } else {
+          alert('Could not parse any valid URLs from the file. Ensure Column 1 contains URLs and Column 2 contains keywords.');
+        }
+      }
+    };
+    reader.readAsText(file);
+
+    // Reset file input
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
+  // Download Sample Text File
+  const handleDownloadSampleFile = () => {
+    const sampleContent = `# Sample URL & Mapped Keywords File
+# Column 1: URL | Column 2: Mapped Keywords (separated by commas)
+
+https://en.wikipedia.org/wiki/Artificial_intelligence\tneural network, algorithm, robot
+https://en.wikipedia.org/wiki/Machine_learning\ttraining, model, dataset, quantum
+https://en.wikipedia.org/wiki/Renewable_energy\tcarbon, efficiency, grid, sustainability
+https://react.dev\tcomponent, hooks, state, JSX
+`;
+
+    const blob = new Blob([sampleContent], { type: 'text/plain;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'sample-urls-and-keywords.txt';
+    link.click();
+  };
+
+  // Parse Bulk Mapped Text
+  const handleParseBulkMappedText = () => {
+    if (!bulkMappedText.trim()) return;
+
+    const parsed = parseRawTextContent(bulkMappedText);
+
+    if (parsed.length > 0) {
+      setTargets(parsed);
       setBulkMappedText('');
       setShowBulkText(false);
+      setImportStatus(`Loaded ${parsed.length} URL target mappings.`);
     } else {
-      alert('Could not parse valid targets from bulk text. Please use format: URL | keyword1, keyword2');
+      alert('Could not parse valid targets from bulk text.');
     }
   };
 
@@ -189,7 +291,7 @@ export const SearchControls: React.FC<SearchControlsProps> = ({
         .filter(t => t.url.length > 0 && t.keywords.length > 0);
 
       if (validTargets.length === 0) {
-        alert('Please add at least one URL with at least one mapped keyword.');
+        alert('Please add or import at least one URL with mapped keywords.');
         return;
       }
 
@@ -260,7 +362,7 @@ export const SearchControls: React.FC<SearchControlsProps> = ({
 
           {/* Quick Sample Presets */}
           <div className="flex items-center gap-1 overflow-x-auto">
-            <span className="text-xs font-medium text-zinc-500 whitespace-nowrap hidden sm:inline">
+            <span className="text-xs font-medium text-zinc-500 whitespace-nowrap hidden sm:inline font-mono">
               Presets:
             </span>
             {SAMPLE_PRESETS.map((preset) => {
@@ -270,7 +372,7 @@ export const SearchControls: React.FC<SearchControlsProps> = ({
                   key={preset.id}
                   type="button"
                   onClick={() => handleLoadPreset(preset)}
-                  className={`px-2.5 py-1 text-xs font-medium rounded-lg border transition-all whitespace-nowrap flex items-center gap-1 ${
+                  className={`px-2.5 py-1 text-xs font-medium rounded-lg border transition-all whitespace-nowrap flex items-center gap-1 font-mono ${
                     isSelected
                       ? 'bg-blue-600/20 border-blue-500/50 text-blue-300'
                       : 'bg-zinc-950 border-zinc-800 text-zinc-400 hover:text-zinc-200'
@@ -289,35 +391,109 @@ export const SearchControls: React.FC<SearchControlsProps> = ({
         {/* MODE 1: Mapped Keywords Per URL */}
         {searchMode === 'mapped' ? (
           <div className="space-y-4">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
               <label className="text-xs font-semibold uppercase tracking-wider text-zinc-300 flex items-center gap-1.5 font-mono">
                 <Link2 className="w-4 h-4 text-blue-400" />
                 URL & Mapped Keywords Builder ({targets.length} Target Pages)
               </label>
 
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
+                {/* File Upload Button */}
+                <button
+                  type="button"
+                  onClick={() => setShowFileUpload(!showFileUpload)}
+                  className="text-xs text-emerald-400 hover:text-emerald-300 transition-colors flex items-center gap-1 font-mono bg-emerald-500/10 px-2.5 py-1 rounded-lg border border-emerald-500/20"
+                >
+                  <UploadCloud className="w-3.5 h-3.5" />
+                  <span>Upload Text/CSV File</span>
+                </button>
+
                 <button
                   type="button"
                   onClick={() => setShowBulkText(!showBulkText)}
-                  className="text-xs text-indigo-400 hover:text-indigo-300 transition-colors flex items-center gap-1 font-mono"
+                  className="text-xs text-indigo-400 hover:text-indigo-300 transition-colors flex items-center gap-1 font-mono bg-indigo-500/10 px-2.5 py-1 rounded-lg border border-indigo-500/20"
                 >
                   <Code2 className="w-3.5 h-3.5" />
-                  {showBulkText ? 'Hide Bulk Paste' : 'Bulk Paste (URL | keywords)'}
+                  {showBulkText ? 'Hide Paste' : 'Bulk Paste Text'}
                 </button>
               </div>
             </div>
+
+            {/* Notification Banner when File is Imported */}
+            {importStatus && (
+              <div className="p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-xl text-xs text-emerald-300 font-mono flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <Check className="w-4 h-4 text-emerald-400 shrink-0" />
+                  <span>{importStatus}</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setImportStatus(null)}
+                  className="text-emerald-400 hover:text-emerald-200"
+                >
+                  &times;
+                </button>
+              </div>
+            )}
+
+            {/* File Upload Drawer / Dropzone */}
+            {showFileUpload && (
+              <div className="bg-zinc-950 rounded-2xl p-4 sm:p-5 border border-emerald-500/30 space-y-4 font-mono text-xs animate-in fade-in zoom-in-95 duration-150">
+                <div className="flex items-start justify-between gap-2 border-b border-zinc-800 pb-3">
+                  <div>
+                    <h4 className="font-bold text-zinc-100 flex items-center gap-2 text-sm">
+                      <FileText className="w-4 h-4 text-emerald-400" />
+                      Import Text / CSV File with Mapped Keywords
+                    </h4>
+                    <p className="text-zinc-400 mt-1">
+                      File format: <strong>Column 1 = Webpage URL</strong> | <strong>Column 2 = Mapped Keywords</strong> (separated by Tab, Comma, Pipe, or Semicolon)
+                    </p>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={handleDownloadSampleFile}
+                    className="px-2.5 py-1 rounded-lg bg-zinc-900 border border-zinc-800 text-zinc-300 hover:text-white hover:bg-zinc-800 transition-colors flex items-center gap-1 text-[11px]"
+                  >
+                    <Download className="w-3.5 h-3.5 text-blue-400" />
+                    Download Sample File
+                  </button>
+                </div>
+
+                {/* Dropzone input */}
+                <div className="border-2 border-dashed border-emerald-500/30 hover:border-emerald-500/60 rounded-xl p-6 text-center bg-zinc-900/50 hover:bg-zinc-900 transition-all cursor-pointer">
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept=".txt,.csv,.tsv,.text"
+                    onChange={handleFileUpload}
+                    className="hidden"
+                    id="txt-csv-file-input"
+                  />
+                  <label htmlFor="txt-csv-file-input" className="cursor-pointer block space-y-2">
+                    <UploadCloud className="w-8 h-8 mx-auto text-emerald-400 opacity-80" />
+                    <div className="text-sm font-bold text-zinc-200">
+                      Click to choose or drop text file (.txt, .csv, .tsv)
+                    </div>
+                    <div className="text-zinc-500 text-[11px]">
+                      Supports Tab-separated, Comma-separated, or Pipe-separated text columns
+                    </div>
+                  </label>
+                </div>
+              </div>
+            )}
 
             {/* Bulk Paste Drawer */}
             {showBulkText && (
               <div className="bg-zinc-950 rounded-xl p-4 border border-zinc-800 space-y-3 font-mono text-xs">
                 <p className="text-zinc-400">
-                  Paste URLs and keywords mapped per line in format: <strong className="text-zinc-200">URL | keyword1, keyword2</strong>
+                  Paste URLs and mapped keywords line-by-line in format: <strong className="text-zinc-200">URL | keyword1, keyword2</strong> or <strong className="text-zinc-200">URL [TAB] keyword1, keyword2</strong>
                 </p>
                 <textarea
                   value={bulkMappedText}
                   onChange={(e) => setBulkMappedText(e.target.value)}
-                  rows={3}
-                  placeholder={`https://en.wikipedia.org/wiki/Artificial_intelligence | neural network, algorithm\nhttps://en.wikipedia.org/wiki/Machine_learning | training, model, dataset`}
+                  rows={4}
+                  placeholder={`https://en.wikipedia.org/wiki/Artificial_intelligence\tneural network, algorithm\nhttps://en.wikipedia.org/wiki/Machine_learning\ttraining, model, dataset`}
                   className="w-full rounded-lg border border-zinc-800 bg-zinc-900 p-3 text-zinc-200 placeholder-zinc-600 outline-none focus:border-blue-500"
                 />
                 <button
@@ -568,7 +744,7 @@ export const SearchControls: React.FC<SearchControlsProps> = ({
           <button
             type="submit"
             disabled={isLoading}
-            className="w-full sm:w-auto px-6 py-2.5 rounded-xl font-semibold text-sm bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-500/20 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2"
+            className="w-full sm:w-auto px-6 py-2.5 rounded-xl font-semibold text-sm bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-500/20 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2 font-mono"
           >
             {isLoading ? (
               <>
