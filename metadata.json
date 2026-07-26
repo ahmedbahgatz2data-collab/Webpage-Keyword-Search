@@ -1,0 +1,6 @@
+{
+  "name": "Webpage Keyword Search",
+  "description": "Search online webpages for specific keywords and phrases with live fetching, match highlighting, density analysis, and snippet extractions.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
