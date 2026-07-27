@@ -31,47 +31,61 @@ export const ExportModal: React.FC<ExportModalProps> = ({
     triggerDownloaded('JSON');
   };
 
-  // Export CSV matching exact requested columns + keyword breakdown
+  // Export CSV matching exact requested columns + 1 row per keyword structure
   const handleExportCsv = () => {
     const headers = [
       'URL',
       'Title',
       'Status',
       'Searched Keywords',
-      'Found Keywords',
-      'Not Found Keywords',
-      'Status Found or Not',
+      'Status Found or Not Found',
       'Total Matches',
       'Word Count',
       'Fetch Time (ms)',
       'Context Snippets'
     ];
 
-    const rows = results.map(p => {
+    const rows: string[] = [];
+
+    results.forEach(p => {
       const targetKws = p.targetKeywords && p.targetKeywords.length > 0 ? p.targetKeywords : keywords;
-      const foundKws = p.foundKeywords || targetKws.filter(kw => (p.keywordMatches?.[kw]?.count || 0) > 0);
-      const notFoundKws = p.notFoundKeywords || targetKws.filter(kw => !p.keywordMatches?.[kw] || p.keywordMatches[kw].count === 0);
 
-      const statusFound = p.status === 'error' ? 'Error' : p.totalMatches > 0 ? `Found (${foundKws.length}/${targetKws.length})` : 'Not Found';
+      targetKws.forEach(kw => {
+        const km = p.keywordMatches?.[kw];
+        const matchCount = km?.count || 0;
+        const isFound = matchCount > 0;
+        const statusFoundOrNot = p.status === 'error' ? 'Error' : isFound ? 'Found' : 'Not found';
+        const snippets = km?.snippets || [];
 
-      const allSnippetsText = (Object.values(p.keywordMatches || {}) as any[])
-        .flatMap(km => km.snippets || [])
-        .map(s => `[${s.keyword}] ${s.text.replace(/[\r\n]+/g, ' ')}`)
-        .join(' | ');
-
-      return [
-        `"${p.url.replace(/"/g, '""')}"`,
-        `"${(p.title || '').replace(/"/g, '""')}"`,
-        p.status,
-        `"${targetKws.join('; ')}"`,
-        `"${foundKws.join('; ') || 'None'}"`,
-        `"${notFoundKws.join('; ') || 'None'}"`,
-        `"${statusFound}"`,
-        p.totalMatches,
-        p.wordCount,
-        p.fetchTimeMs,
-        `"${allSnippetsText.replace(/"/g, '""')}"`
-      ].join(',');
+        if (snippets.length > 0) {
+          snippets.forEach(s => {
+            const snippetText = s.text.replace(/[\r\n]+/g, ' ');
+            rows.push([
+              `"${p.url.replace(/"/g, '""')}"`,
+              `"${(p.title || 'Untitled').replace(/"/g, '""')}"`,
+              p.status === 'error' ? 'Error' : '200 OK',
+              `"${kw.replace(/"/g, '""')}"`,
+              `"${statusFoundOrNot}"`,
+              matchCount,
+              p.wordCount || 0,
+              p.fetchTimeMs || 0,
+              `"${snippetText.replace(/"/g, '""')}"`
+            ].join(','));
+          });
+        } else {
+          rows.push([
+            `"${p.url.replace(/"/g, '""')}"`,
+            `"${(p.title || 'Untitled').replace(/"/g, '""')}"`,
+            p.status === 'error' ? 'Error' : '200 OK',
+            `"${kw.replace(/"/g, '""')}"`,
+            `"${statusFoundOrNot}"`,
+            matchCount,
+            p.wordCount || 0,
+            p.fetchTimeMs || 0,
+            `"-"`
+          ].join(','));
+        }
+      });
     });
 
     const csvContent = [headers.join(','), ...rows].join('\n');
@@ -91,20 +105,28 @@ export const ExportModal: React.FC<ExportModalProps> = ({
     md += `**Total Webpages:** ${results.length}\n`;
     md += `**Total Keyword Occurrences:** ${results.reduce((a, b) => a + b.totalMatches, 0)}\n\n`;
     md += `## Detailed Results Table\n\n`;
-    md += `| URL | Title | Status | Found Keywords | Not Found Keywords | Status Found or Not | Total Matches | Context Snippet Excerpt |\n`;
-    md += `| --- | --- | --- | --- | --- | --- | --- | --- |\n`;
+    md += `| URL | Title | Status | Searched Keywords | Status Found or Not Found | Total Matches | Word Count | Fetch Time (ms) | Context Snippets |\n`;
+    md += `| --- | --- | --- | --- | --- | --- | --- | --- | --- |\n`;
 
     results.forEach(p => {
       const targetKws = p.targetKeywords && p.targetKeywords.length > 0 ? p.targetKeywords : keywords;
-      const foundKws = p.foundKeywords || targetKws.filter(kw => (p.keywordMatches?.[kw]?.count || 0) > 0);
-      const notFoundKws = p.notFoundKeywords || targetKws.filter(kw => !p.keywordMatches?.[kw] || p.keywordMatches[kw].count === 0);
 
-      const statusFound = p.status === 'error' ? 'Error' : p.totalMatches > 0 ? `Found (${foundKws.length}/${targetKws.length})` : 'Not Found';
+      targetKws.forEach(kw => {
+        const km = p.keywordMatches?.[kw];
+        const matchCount = km?.count || 0;
+        const isFound = matchCount > 0;
+        const statusFoundOrNot = p.status === 'error' ? 'Error' : isFound ? 'Found' : 'Not found';
+        const snippets = km?.snippets || [];
 
-      const topSnippet = (Object.values(p.keywordMatches || {}) as any[])
-        .flatMap(km => km.snippets || [])[0]?.text.replace(/[\r\n]+/g, ' ') || 'No Context';
-
-      md += `| ${p.url} | ${p.title || 'Untitled'} | ${p.status} | ${foundKws.join(', ') || 'None'} | ${notFoundKws.join(', ') || 'None'} | ${statusFound} | ${p.totalMatches} | ${topSnippet.slice(0, 100)}... |\n`;
+        if (snippets.length > 0) {
+          snippets.forEach(s => {
+            const snippetText = s.text.replace(/[\r\n]+/g, ' ');
+            md += `| ${p.url} | ${p.title || 'Untitled'} | ${p.status === 'error' ? 'Error' : '200 OK'} | ${kw} | ${statusFoundOrNot} | ${matchCount} | ${p.wordCount || 0} | ${p.fetchTimeMs || 0} | ${snippetText.slice(0, 120)} |\n`;
+          });
+        } else {
+          md += `| ${p.url} | ${p.title || 'Untitled'} | ${p.status === 'error' ? 'Error' : '200 OK'} | ${kw} | ${statusFoundOrNot} | ${matchCount} | ${p.wordCount || 0} | ${p.fetchTimeMs || 0} | - |\n`;
+        }
+      });
     });
 
     const blob = new Blob([md], { type: 'text/markdown' });
