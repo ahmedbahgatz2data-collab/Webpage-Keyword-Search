@@ -144,56 +144,137 @@ function searchKeywordsInText(
   return { keywordMatches, totalMatches };
 }
 
-// Fetch single webpage with timeout
-async function fetchWebpage(url: string) {
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 12000); // 12 seconds timeout
+// Fetch single webpage with timeout & Stealth Mode anti-bot bypass support
+async function fetchWebpage(url: string, stealthMode: boolean = true) {
+  const getHeadersProfile = (profileType: 'stealth_chrome' | 'googlebot' | 'safari' | 'standard') => {
+    let hostname = '';
+    try {
+      hostname = new URL(url).hostname;
+    } catch {}
 
-  try {
-    const response = await fetch(url, {
-      signal: controller.signal,
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+    if (profileType === 'googlebot') {
+      return {
+        'User-Agent': 'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)',
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
         'Accept-Language': 'en-US,en;q=0.9',
         'Cache-Control': 'no-cache'
-      },
-      redirect: 'follow'
-    });
-
-    clearTimeout(timeoutId);
-
-    if (!response.ok) {
-      return {
-        ok: false,
-        status: response.status,
-        statusText: response.statusText,
-        error: `HTTP Error ${response.status}: ${response.statusText}`
       };
     }
 
-    const contentType = response.headers.get('content-type') || '';
-    if (!contentType.includes('text/') && !contentType.includes('html') && !contentType.includes('xml')) {
+    if (profileType === 'safari') {
       return {
-        ok: false,
-        status: response.status,
-        error: `URL returned non-HTML content type (${contentType})`
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.3.1 Safari/605.1.15',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Referer': hostname ? `https://${hostname}/` : 'https://www.google.com/'
       };
     }
 
-    const html = await response.text();
+    if (profileType === 'stealth_chrome') {
+      return {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'Cache-Control': 'max-age=0',
+        'Sec-Ch-Ua': '"Google Chrome";v="123", "Not:A-Brand";v="8", "Chromium";v="123"',
+        'Sec-Ch-Ua-Mobile': '?0',
+        'Sec-Ch-Ua-Platform': '"Windows"',
+        'Sec-Fetch-Dest': 'document',
+        'Sec-Fetch-Mode': 'navigate',
+        'Sec-Fetch-Site': 'cross-site',
+        'Sec-Fetch-User': '?1',
+        'Upgrade-Insecure-Requests': '1',
+        'Referer': 'https://www.google.com/'
+      };
+    }
+
     return {
-      ok: true,
-      status: response.status,
-      html
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+      'Accept-Language': 'en-US,en;q=0.9',
+      'Cache-Control': 'no-cache'
     };
-  } catch (err: any) {
-    clearTimeout(timeoutId);
-    if (err.name === 'AbortError') {
-      return { ok: false, error: 'Connection timed out after 12 seconds' };
+  };
+
+  const profilesToTry: Array<'stealth_chrome' | 'googlebot' | 'safari' | 'standard'> = stealthMode
+    ? ['stealth_chrome', 'googlebot', 'safari']
+    : ['standard', 'stealth_chrome'];
+
+  let lastStatus = 0;
+  let lastStatusText = '';
+  let lastError = '';
+
+  for (let i = 0; i < profilesToTry.length; i++) {
+    const profile = profilesToTry[i];
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 12000); // 12 seconds timeout
+
+    try {
+      const response = await fetch(url, {
+        signal: controller.signal,
+        headers: getHeadersProfile(profile),
+        redirect: 'follow'
+      });
+
+      clearTimeout(timeoutId);
+
+      if (response.ok) {
+        const contentType = response.headers.get('content-type') || '';
+        if (!contentType.includes('text/') && !contentType.includes('html') && !contentType.includes('xml')) {
+          return {
+            ok: false,
+            status: response.status,
+            error: `URL returned non-HTML content type (${contentType})`
+          };
+        }
+
+        const html = await response.text();
+        return {
+          ok: true,
+          status: response.status,
+          html
+        };
+      }
+
+      lastStatus = response.status;
+      lastStatusText = response.statusText;
+
+      // If status is 403 or 401 or 429, continue to next stealth profile attempt
+      if ([403, 401, 405, 429, 503].includes(response.status)) {
+        lastError = `HTTP Error ${response.status}: ${response.statusText}`;
+        continue;
+      } else {
+        // Hard failure like 404
+        return {
+          ok: false,
+          status: response.status,
+          statusText: response.statusText,
+          error: `HTTP Error ${response.status}: ${response.statusText}`
+        };
+      }
+    } catch (err: any) {
+      clearTimeout(timeoutId);
+      if (err.name === 'AbortError') {
+        lastError = 'Connection timed out after 12 seconds';
+      } else {
+        lastError = err.message || 'Failed to fetch webpage';
+      }
     }
-    return { ok: false, error: err.message || 'Failed to fetch webpage' };
   }
+
+  // If all stealth attempts failed
+  let finalErrorMsg = lastError || `HTTP Error ${lastStatus}: ${lastStatusText}`;
+  if (lastStatus === 403) {
+    finalErrorMsg = `HTTP Error 403: Forbidden (Protected by Bot Detection WAF/Cloudflare/Siemens Portal. Stealth Mode attempted Chrome & Googlebot headers)`;
+  }
+
+  return {
+    ok: false,
+    status: lastStatus || 403,
+    statusText: lastStatusText,
+    error: finalErrorMsg
+  };
 }
 
 // Health route
@@ -227,18 +308,21 @@ app.post('/api/fetch-and-search', async (req, res) => {
     return res.status(400).json({ error: 'Please provide valid webpage URLs and keywords to search.' });
   }
 
+  const stealthMode = options.stealthMode !== false; // Default true for maximum anti-bot resilience
+
   const searchOpts = {
     matchCase: Boolean(options.matchCase),
     exactPhrase: Boolean(options.exactPhrase),
     useRegex: Boolean(options.useRegex),
-    contextLength: typeof options.contextLength === 'number' ? options.contextLength : 80
+    contextLength: typeof options.contextLength === 'number' ? options.contextLength : 80,
+    stealthMode
   };
 
   // Run fetches concurrently
   const pagePromises = searchTargets.map(async (target) => {
     const { url, keywords: targetKw } = target;
     const pageStartTime = Date.now();
-    const fetchRes = await fetchWebpage(url);
+    const fetchRes = await fetchWebpage(url, stealthMode);
     const fetchTimeMs = Date.now() - pageStartTime;
 
     if (!fetchRes.ok) {

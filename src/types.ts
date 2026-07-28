@@ -3,6 +3,7 @@ export interface SearchOptions {
   exactPhrase: boolean;
   useRegex: boolean;
   contextLength: number; // characters before and after match
+  stealthMode?: boolean; // Anti-bot / modern Chrome browser headers bypass mode
 }
 
 export interface Snippet {

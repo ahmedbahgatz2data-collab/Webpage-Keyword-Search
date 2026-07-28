@@ -18,7 +18,8 @@ import {
   Pause,
   Play,
   Square,
-  XCircle
+  XCircle,
+  ShieldCheck
 } from 'lucide-react';
 import { SearchOptions, PresetSample } from '../types';
 import { SAMPLE_PRESETS } from '../data/presets';
@@ -79,7 +80,8 @@ export const SearchControls: React.FC<SearchControlsProps> = ({
     matchCase: false,
     exactPhrase: true,
     useRegex: false,
-    contextLength: 90
+    contextLength: 90,
+    stealthMode: true
   });
 
   const [selectedPresetId, setSelectedPresetId] = useState<string | null>(null);
@@ -926,6 +928,19 @@ https://react.dev\tcomponent, hooks, state, JSX
                 className="w-4 h-4 bg-zinc-950 border-zinc-800 text-blue-600 rounded focus:ring-blue-500"
               />
               <span className={isDark ? "text-zinc-300" : "text-slate-700"}>Exact Phrase</span>
+            </label>
+
+            <label className="inline-flex items-center gap-1.5 cursor-pointer select-none bg-emerald-500/10 px-2 py-1 rounded-lg border border-emerald-500/20" title="Uses browser-like Sec-Ch-Ua headers & Googlebot fallbacks to bypass WAF & 403 Forbidden blocks">
+              <input
+                type="checkbox"
+                checked={options.stealthMode !== false}
+                onChange={(e) => setOptions({ ...options, stealthMode: e.target.checked })}
+                className="w-4 h-4 bg-zinc-950 border-zinc-800 text-emerald-500 rounded focus:ring-emerald-500"
+              />
+              <span className="text-emerald-500 font-semibold flex items-center gap-1">
+                <ShieldCheck className="w-3.5 h-3.5" />
+                <span>Stealth Mode (403 Bypass)</span>
+              </span>
             </label>
 
             <div className={isDark ? "flex items-center gap-1.5 pl-2 border-l border-zinc-800" : "flex items-center gap-1.5 pl-2 border-l border-slate-200"}>
