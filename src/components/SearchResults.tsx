@@ -7,6 +7,7 @@ import {
   Sparkles,
   FileText,
   AlertCircle,
+  AlertTriangle,
   Clock,
   Hash,
   ChevronDown,
@@ -60,6 +61,7 @@ export const SearchResults: React.FC<SearchResultsProps> = ({
   const totalPages = results.length;
   const totalMatches = results.reduce((acc, p) => acc + (p.totalMatches || 0), 0);
   const totalWords = results.reduce((acc, p) => acc + (p.wordCount || 0), 0);
+  const failedPagesCount = results.filter(p => p.status === 'error').length;
 
   // Collect all keywords searched across pages
   const allSearchedKeywords = Array.from(
@@ -145,7 +147,7 @@ export const SearchResults: React.FC<SearchResultsProps> = ({
   return (
     <div className="space-y-6">
       {/* Bento Stats Grid */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3.5 font-mono">
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-3.5 font-mono">
         <div className={isDark ? "bg-zinc-900/90 rounded-2xl p-4 border border-zinc-800 shadow-sm flex items-center gap-3.5 hover:border-zinc-700 transition-colors" : "bg-white rounded-2xl p-4 border border-slate-200 shadow-xs flex items-center gap-3.5 hover:border-slate-300 transition-colors"}>
           <div className="w-10 h-10 rounded-xl bg-blue-500/10 border border-blue-500/20 text-blue-500 flex items-center justify-center shrink-0">
             <Search className="w-5 h-5" />
@@ -176,6 +178,27 @@ export const SearchResults: React.FC<SearchResultsProps> = ({
           </div>
         </div>
 
+        <button
+          onClick={() => failedPagesCount > 0 && setFilterStatus('error')}
+          className={`${
+            failedPagesCount > 0
+              ? isDark ? "bg-rose-950/40 border-rose-500/40 text-rose-400 cursor-pointer" : "bg-rose-50 border-rose-300 text-rose-700 cursor-pointer"
+              : isDark ? "bg-zinc-900/90 border-zinc-800 text-zinc-400" : "bg-white border-slate-200 text-slate-500"
+          } rounded-2xl p-4 border shadow-sm flex items-center gap-3.5 transition-all text-left`}
+        >
+          <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 border ${
+            failedPagesCount > 0
+              ? 'bg-rose-500/10 border-rose-500/30 text-rose-500'
+              : 'bg-emerald-500/10 border-emerald-500/20 text-emerald-500'
+          }`}>
+            {failedPagesCount > 0 ? <AlertTriangle className="w-5 h-5" /> : <CheckCircle2 className="w-5 h-5" />}
+          </div>
+          <div>
+            <div className={`text-2xl font-bold ${failedPagesCount > 0 ? 'text-rose-500' : 'text-emerald-500'}`}>{failedPagesCount}</div>
+            <div className="text-xs font-medium">Failed / Broken URLs</div>
+          </div>
+        </button>
+
         <div className={isDark ? "bg-zinc-900/90 rounded-2xl p-4 border border-zinc-800 shadow-sm flex items-center gap-3.5 hover:border-zinc-700 transition-colors" : "bg-white rounded-2xl p-4 border border-slate-200 shadow-xs flex items-center gap-3.5 hover:border-slate-300 transition-colors"}>
           <div className="w-10 h-10 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-500 flex items-center justify-center shrink-0">
             <Clock className="w-5 h-5" />
@@ -186,6 +209,28 @@ export const SearchResults: React.FC<SearchResultsProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Top Alert Banner for Failed Pages */}
+      {failedPagesCount > 0 && (
+        <div className={isDark ? "bg-rose-950/40 border border-rose-500/40 text-rose-300 rounded-2xl p-4 flex flex-wrap items-center justify-between gap-3 text-xs font-mono" : "bg-rose-50 border border-rose-300 text-rose-800 rounded-2xl p-4 flex flex-wrap items-center justify-between gap-3 text-xs font-mono"}>
+          <div className="flex items-center gap-2.5">
+            <AlertTriangle className="w-5 h-5 text-rose-500 shrink-0" />
+            <div>
+              <span className="font-bold">{failedPagesCount} URL{failedPagesCount > 1 ? 's' : ''} failed to load or scan</span>
+              <span className="opacity-80 block sm:inline sm:ml-2">
+                (e.g., HTTP 403 Forbidden, timeout, or anti-bot block)
+              </span>
+            </div>
+          </div>
+          <button
+            onClick={() => setFilterStatus('error')}
+            className="px-3 py-1.5 rounded-lg bg-rose-500 text-white font-bold hover:bg-rose-600 transition-colors shrink-0 text-xs flex items-center gap-1.5"
+          >
+            <XCircle className="w-3.5 h-3.5" />
+            Show Failed URLs ({failedPagesCount})
+          </button>
+        </div>
+      )}
 
       {/* Control Bar & Filter Bar */}
       <div className={isDark ? "bg-zinc-900/90 rounded-2xl p-4 border border-zinc-800 shadow-sm flex flex-wrap items-center justify-between gap-3 text-xs font-mono" : "bg-white rounded-2xl p-4 border border-slate-200 shadow-xs flex flex-wrap items-center justify-between gap-3 text-xs font-mono"}>
@@ -679,6 +724,23 @@ export const SearchResults: React.FC<SearchResultsProps> = ({
                       </span>
                     ))}
                   </div>
+
+                  {/* Error Callout Box */}
+                  {hasError && (
+                    <div className="p-4 font-mono">
+                      <div className={`p-3.5 rounded-xl border space-y-1.5 ${
+                        isDark ? 'bg-rose-950/60 border-rose-500/40 text-rose-300' : 'bg-rose-100/90 border-rose-300 text-rose-900'
+                      }`}>
+                        <div className="flex items-center gap-2 font-bold text-xs text-rose-500">
+                          <AlertTriangle className="w-4 h-4 shrink-0" />
+                          <span>Fetch & Scan Failed</span>
+                        </div>
+                        <p className="text-xs leading-relaxed font-mono opacity-95 break-words">
+                          {page.errorMessage || 'HTTP Error: Webpage could not be fetched or loaded.'}
+                        </p>
+                      </div>
+                    </div>
+                  )}
 
                   {/* Context Snippets */}
                   {isExpanded && !hasError && (

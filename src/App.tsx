@@ -323,56 +323,6 @@ export default function App() {
             theme={theme}
           />
         )}
-
-        {/* Initial Empty State / Helper Guide */}
-        {results.length === 0 && !isScanning && (
-          <div className={isDark ? 'bg-zinc-900/80 rounded-2xl border border-zinc-800 p-8 sm:p-12 text-center max-w-3xl mx-auto space-y-6 shadow-md' : 'bg-white rounded-2xl border border-slate-200 p-8 sm:p-12 text-center max-w-3xl mx-auto space-y-6 shadow-xs'}>
-            <div className="w-16 h-16 rounded-2xl bg-blue-500/10 text-blue-500 border border-blue-500/20 flex items-center justify-center mx-auto shadow-inner">
-              <Globe className="w-8 h-8" />
-            </div>
-
-            <div className="space-y-2">
-              <h2 className={isDark ? 'text-xl font-bold text-zinc-100' : 'text-xl font-bold text-slate-900'}>
-                Webpage Keyword Search Engine
-              </h2>
-              <p className={isDark ? 'text-xs sm:text-sm text-zinc-400 max-w-lg mx-auto leading-relaxed font-mono' : 'text-xs sm:text-sm text-slate-500 max-w-lg mx-auto leading-relaxed font-mono'}>
-                Provide target URLs and keywords above to scan real-time web pages instantly.
-              </p>
-            </div>
-
-            <div className={isDark ? 'grid grid-cols-1 sm:grid-cols-3 gap-4 pt-4 text-left border-t border-zinc-800 text-xs' : 'grid grid-cols-1 sm:grid-cols-3 gap-4 pt-4 text-left border-t border-slate-200 text-xs'}>
-              <div className={isDark ? 'p-3.5 rounded-xl bg-zinc-950 border border-zinc-800 space-y-1' : 'p-3.5 rounded-xl bg-slate-50 border border-slate-200 space-y-1'}>
-                <div className={isDark ? 'font-semibold text-zinc-200 flex items-center gap-1.5 font-mono' : 'font-semibold text-slate-800 flex items-center gap-1.5 font-mono'}>
-                  <Globe className="w-4 h-4 text-blue-500" />
-                  1. Server Fetch
-                </div>
-                <p className={isDark ? 'text-zinc-500 text-[11px] leading-normal font-mono' : 'text-slate-500 text-[11px] leading-normal font-mono'}>
-                  Fetches live HTML server-side without CORS limitations.
-                </p>
-              </div>
-
-              <div className={isDark ? 'p-3.5 rounded-xl bg-zinc-950 border border-zinc-800 space-y-1' : 'p-3.5 rounded-xl bg-slate-50 border border-slate-200 space-y-1'}>
-                <div className={isDark ? 'font-semibold text-zinc-200 flex items-center gap-1.5 font-mono' : 'font-semibold text-slate-800 flex items-center gap-1.5 font-mono'}>
-                  <KeyRound className="w-4 h-4 text-indigo-500" />
-                  2. Keyword Scan
-                </div>
-                <p className={isDark ? 'text-zinc-500 text-[11px] leading-normal font-mono' : 'text-slate-500 text-[11px] leading-normal font-mono'}>
-                  Scans for exact phrases, case variants, or regex snippets.
-                </p>
-              </div>
-
-              <div className={isDark ? 'p-3.5 rounded-xl bg-zinc-950 border border-zinc-800 space-y-1' : 'p-3.5 rounded-xl bg-slate-50 border border-slate-200 space-y-1'}>
-                <div className={isDark ? 'font-semibold text-zinc-200 flex items-center gap-1.5 font-mono' : 'font-semibold text-slate-800 flex items-center gap-1.5 font-mono'}>
-                  <Sparkles className="w-4 h-4 text-amber-500" />
-                  3. Gemini AI
-                </div>
-                <p className={isDark ? 'text-zinc-500 text-[11px] leading-normal font-mono' : 'text-slate-500 text-[11px] leading-normal font-mono'}>
-                  Generate instant summaries and Q&A insights on keyword findings.
-                </p>
-              </div>
-            </div>
-          </div>
-        )}
       </main>
 
       {/* Modals */}
