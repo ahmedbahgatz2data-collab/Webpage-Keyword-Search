@@ -12,12 +12,14 @@ export interface Snippet {
   text: string; // context snippet text
   matchIndexInSnippet: number; // position within snippet
   matchLength: number;
+  location?: 'visible' | 'raw_code'; // 'visible' = Visible Page Text, 'raw_code' = Raw Code / SSR Data
 }
 
 export interface KeywordMatch {
   keyword: string;
   count: number;
   snippets: Snippet[];
+  foundIn?: 'visible' | 'raw_code' | 'both'; // 'visible' = Visible Page Text, 'raw_code' = Raw Code / SSR Data, 'both' = Found in both
 }
 
 export interface PageResult {

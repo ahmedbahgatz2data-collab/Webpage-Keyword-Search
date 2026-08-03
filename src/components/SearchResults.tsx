@@ -14,6 +14,8 @@ import {
   ChevronUp,
   Eye,
   EyeOff,
+  Code2,
+  Layers,
   Search,
   Filter,
   ArrowUpDown,
@@ -552,10 +554,34 @@ export const SearchResults: React.FC<SearchResultsProps> = ({
                               Error
                             </span>
                           ) : isFound ? (
-                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-emerald-500/15 text-emerald-600 border border-emerald-500/30">
-                              <CheckCircle2 className="w-3.5 h-3.5" />
-                              Found
-                            </span>
+                            <div className="space-y-1">
+                              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-emerald-500/15 text-emerald-600 border border-emerald-500/30">
+                                <CheckCircle2 className="w-3.5 h-3.5" />
+                                Found
+                              </span>
+                              {(() => {
+                                const km = page.keywordMatches?.[keyword];
+                                const foundIn = km?.foundIn || 'visible';
+                                return (
+                                  <div>
+                                    <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-sans font-semibold border ${
+                                      foundIn === 'visible'
+                                        ? 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20'
+                                        : foundIn === 'raw_code'
+                                        ? 'bg-amber-500/10 text-amber-600 border-amber-500/20'
+                                        : 'bg-indigo-500/10 text-indigo-600 border-indigo-500/20'
+                                    }`}>
+                                      {foundIn === 'visible' && <Eye className="w-2.5 h-2.5 text-emerald-500" />}
+                                      {foundIn === 'raw_code' && <Code2 className="w-2.5 h-2.5 text-amber-500" />}
+                                      {foundIn === 'both' && <Layers className="w-2.5 h-2.5 text-indigo-500" />}
+                                      <span>
+                                        {foundIn === 'visible' ? 'ظاهر الصفحة' : foundIn === 'raw_code' ? 'الكود الخام' : 'ظاهر + الكود'}
+                                      </span>
+                                    </span>
+                                  </div>
+                                );
+                              })()}
+                            </div>
                           ) : (
                             <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-rose-500/10 text-rose-600 border border-rose-500/20">
                               <XCircle className="w-3.5 h-3.5 text-rose-500" />
@@ -602,11 +628,17 @@ export const SearchResults: React.FC<SearchResultsProps> = ({
                               }`}>
                                 {renderHighlightedSnippet(snippet)}
                               </div>
-                              {row.snippetTotal && row.snippetTotal > 1 && (
-                                <div className={`text-[10px] font-mono italic ${isDark ? 'text-amber-400/70' : 'text-amber-700'}`}>
-                                  Snippet #{row.snippetIndex} of {row.snippetTotal}
-                                </div>
-                              )}
+                              <div className="flex items-center justify-between gap-1 text-[10px] font-mono">
+                                <span className={snippet.location === 'raw_code' ? 'text-amber-500 font-semibold flex items-center gap-1' : 'text-emerald-500 font-semibold flex items-center gap-1'}>
+                                  {snippet.location === 'raw_code' ? <Code2 className="w-2.5 h-2.5" /> : <Eye className="w-2.5 h-2.5" />}
+                                  {snippet.location === 'raw_code' ? 'الكود الخام / البيانات المخفية' : 'ظاهر الصفحة'}
+                                </span>
+                                {row.snippetTotal && row.snippetTotal > 1 && (
+                                  <span className={`italic ${isDark ? 'text-amber-400/70' : 'text-amber-700'}`}>
+                                    Snippet #{row.snippetIndex}/{row.snippetTotal}
+                                  </span>
+                                )}
+                              </div>
                             </div>
                           ) : (
                             <span className={`font-mono text-[11px] italic ${isDark ? 'text-zinc-600' : 'text-slate-400'}`}>
@@ -709,13 +741,29 @@ export const SearchResults: React.FC<SearchResultsProps> = ({
                   <div className={`px-4 py-2.5 border-b flex flex-wrap gap-1.5 text-xs font-mono ${
                     isDark ? 'bg-zinc-950/80 border-zinc-800' : 'bg-slate-50 border-slate-200'
                   }`}>
-                    {foundKws.map(kw => (
-                      <span key={kw} className={`px-2 py-0.5 rounded text-[10px] ${
-                        isDark ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30' : 'bg-amber-100 text-amber-800 border border-amber-300'
-                      }`}>
-                        ✓ {kw} ({page.keywordMatches?.[kw]?.count})
-                      </span>
-                    ))}
+                    {foundKws.map(kw => {
+                      const km = page.keywordMatches?.[kw];
+                      const foundIn = km?.foundIn || 'visible';
+                      return (
+                        <span key={kw} className={`px-2 py-0.5 rounded text-[10px] inline-flex items-center gap-1 font-bold ${
+                          isDark ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30' : 'bg-amber-100 text-amber-800 border border-amber-300'
+                        }`}>
+                          <span>✓ {kw} ({km?.count || 0})</span>
+                          <span className={`px-1 py-0.2 rounded text-[9px] font-sans font-normal inline-flex items-center gap-0.5 border ${
+                            foundIn === 'visible'
+                              ? 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20'
+                              : foundIn === 'raw_code'
+                              ? 'bg-amber-500/10 text-amber-500 border-amber-500/20'
+                              : 'bg-indigo-500/10 text-indigo-500 border-indigo-500/20'
+                          }`}>
+                            {foundIn === 'visible' && <Eye className="w-2.5 h-2.5" />}
+                            {foundIn === 'raw_code' && <Code2 className="w-2.5 h-2.5" />}
+                            {foundIn === 'both' && <Layers className="w-2.5 h-2.5" />}
+                            <span>{foundIn === 'visible' ? 'ظاهر' : foundIn === 'raw_code' ? 'الكود الخام' : 'ظاهر + كود'}</span>
+                          </span>
+                        </span>
+                      );
+                    })}
                     {notFoundKws.map(kw => (
                       <span key={kw} className={`px-2 py-0.5 rounded text-[10px] line-through ${
                         isDark ? 'bg-rose-500/10 text-rose-300 border border-rose-500/20' : 'bg-rose-100 text-rose-700 border border-rose-300'
@@ -767,18 +815,30 @@ export const SearchResults: React.FC<SearchResultsProps> = ({
                           {allSnippets.slice(0, 4).map((snippet, idx) => (
                             <div
                               key={idx}
-                              className={`rounded-xl p-2.5 border text-xs ${
+                              className={`rounded-xl p-2.5 border text-xs space-y-1 ${
                                 isDark
                                   ? 'bg-zinc-950/80 border-zinc-800 text-zinc-300'
                                   : 'bg-slate-50 border-slate-200 text-slate-800'
                               }`}
                             >
-                              <span className={`inline-block px-1.5 py-0.5 mr-1.5 rounded text-[10px] font-sans font-bold ${
-                                isDark ? 'bg-amber-500/20 text-amber-300' : 'bg-amber-100 text-amber-800'
-                              }`}>
-                                {snippet.keyword}
-                              </span>
-                              {renderHighlightedSnippet(snippet)}
+                              <div className="flex items-center justify-between text-[10px] font-sans font-bold">
+                                <span className={`inline-block px-1.5 py-0.5 rounded ${
+                                  isDark ? 'bg-amber-500/20 text-amber-300' : 'bg-amber-100 text-amber-800'
+                                }`}>
+                                  {snippet.keyword}
+                                </span>
+                                <span className={`px-1.5 py-0.5 rounded text-[9px] font-mono flex items-center gap-1 border ${
+                                  snippet.location === 'raw_code'
+                                    ? 'bg-amber-500/10 text-amber-500 border-amber-500/20'
+                                    : 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20'
+                                }`}>
+                                  {snippet.location === 'raw_code' ? <Code2 className="w-2.5 h-2.5" /> : <Eye className="w-2.5 h-2.5" />}
+                                  <span>{snippet.location === 'raw_code' ? 'الكود الخام / البيانات المخفية' : 'ظاهر الصفحة'}</span>
+                                </span>
+                              </div>
+                              <div className="text-[11px] leading-tight">
+                                {renderHighlightedSnippet(snippet)}
+                              </div>
                             </div>
                           ))}
                         </div>

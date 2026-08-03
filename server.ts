@@ -32,7 +32,15 @@ function parseHtmlContent(html: string) {
                     html.match(/<meta[^>]*content=["']([\s\S]*?)["'][^>]*name=["']description["'][^>]*>/i);
   const metaDescription = metaMatch ? metaMatch[1].trim() : '';
 
-  // Clean HTML
+  // Extract JSON / Hydration data script contents (Next.js, Nuxt, React, LD+JSON, state objects)
+  const jsonScriptMatches = html.match(/<script[^>]*type=["'](?:application\/json|application\/ld\+json)["'][^>]*>([\s\S]*?)<\/script>/gi) || [];
+  const nextDataMatches = html.match(/<script[^>]*id=["'](?:__NEXT_DATA__|__INITIAL_STATE__|__NUXT__)["'][^>]*>([\s\S]*?)<\/script>/gi) || [];
+
+  const extractedJsonText = [...jsonScriptMatches, ...nextDataMatches]
+    .map(s => s.replace(/<[^>]+>/g, ' ').replace(/[\\"{}\[\]]+/g, ' '))
+    .join(' ');
+
+  // Clean main Body HTML
   let cleaned = html
     .replace(/<script[\s\S]*?<\/script>/gi, ' ')
     .replace(/<style[\s\S]*?<\/style>/gi, ' ')
@@ -49,10 +57,13 @@ function parseHtmlContent(html: string) {
     .replace(/\s+/g, ' ')
     .trim();
 
-  const words = cleaned.split(/\s+/).filter(w => w.length > 0);
+  // Combine visible body text with extracted hydration JSON data
+  const combinedText = (cleaned + ' ' + extractedJsonText).trim();
+
+  const words = combinedText.split(/\s+/).filter(w => w.length > 0);
   const wordCount = words.length;
 
-  return { title, metaDescription, textContent: cleaned, wordCount };
+  return { title, metaDescription, visibleText: cleaned, jsonText: extractedJsonText, textContent: combinedText, wordCount };
 }
 
 // Helper to escape regex special characters
@@ -60,16 +71,18 @@ function escapeRegExp(string: string) {
   return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-// Function to find keyword occurrences & context snippets
+// Function to find keyword occurrences & context snippets with source location (Visible Page vs Raw Code)
 function searchKeywordsInText(
-  text: string,
+  visibleText: string,
   keywords: string[],
   options: {
     matchCase: boolean;
     exactPhrase: boolean;
     useRegex: boolean;
     contextLength: number;
-  }
+  },
+  jsonText: string = '',
+  rawHtml?: string
 ) {
   const keywordMatches: Record<string, any> = {};
   let totalMatches = 0;
@@ -79,63 +92,98 @@ function searchKeywordsInText(
     if (!keyword) return;
 
     const snippets: any[] = [];
-    let count = 0;
+    let visibleCount = 0;
+    let rawCodeCount = 0;
 
-    try {
-      let pattern: RegExp;
-      const flags = options.matchCase ? 'g' : 'gi';
+    const runPatternSearch = (targetText: string, loc: 'visible' | 'raw_code') => {
+      try {
+        let pattern: RegExp;
+        const flags = options.matchCase ? 'g' : 'gi';
 
-      if (options.useRegex) {
-        pattern = new RegExp(keyword, flags);
-      } else if (options.exactPhrase) {
-        pattern = new RegExp(escapeRegExp(keyword), flags);
-      } else {
-        // Whole word or boundary matching if standard spaces
-        const escaped = escapeRegExp(keyword);
-        pattern = new RegExp(escaped, flags);
-      }
-
-      let match: RegExpExecArray | null;
-      const maxSnippets = 30; // Limit max snippets per keyword to avoid payload bloat
-
-      while ((match = pattern.exec(text)) !== null) {
-        count++;
-        if (snippets.length < maxSnippets) {
-          const matchIndex = match.index;
-          const matchLength = match[0].length;
-          const ctxLen = options.contextLength || 80;
-
-          const start = Math.max(0, matchIndex - ctxLen);
-          const end = Math.min(text.length, matchIndex + matchLength + ctxLen);
-
-          let snippetText = text.substring(start, end);
-          if (start > 0) snippetText = '...' + snippetText;
-          if (end < text.length) snippetText = snippetText + '...';
-
-          const matchIndexInSnippet = matchIndex - start + (start > 0 ? 3 : 0);
-
-          snippets.push({
-            id: `snip-${keyword}-${snippets.length}-${matchIndex}`,
-            keyword,
-            text: snippetText,
-            matchIndexInSnippet,
-            matchLength
-          });
+        if (options.useRegex) {
+          pattern = new RegExp(keyword, flags);
+        } else if (options.exactPhrase) {
+          pattern = new RegExp(escapeRegExp(keyword), flags);
+        } else {
+          const escaped = escapeRegExp(keyword);
+          pattern = new RegExp(escaped, flags);
         }
 
-        // Avoid infinite loop on zero-width regex match
-        if (match.index === pattern.lastIndex) {
-          pattern.lastIndex++;
+        let match: RegExpExecArray | null;
+        const maxSnippets = 30;
+
+        while ((match = pattern.exec(targetText)) !== null) {
+          if (loc === 'visible') visibleCount++;
+          else rawCodeCount++;
+
+          if (snippets.length < maxSnippets) {
+            const matchIndex = match.index;
+            const matchLength = match[0].length;
+            const ctxLen = options.contextLength || 80;
+
+            const start = Math.max(0, matchIndex - ctxLen);
+            const end = Math.min(targetText.length, matchIndex + matchLength + ctxLen);
+
+            let snippetText = targetText.substring(start, end);
+
+            // Clean up snippet if from raw HTML code
+            if (loc === 'raw_code') {
+              snippetText = snippetText
+                .replace(/<[^>]+>/g, ' ')
+                .replace(/\s+/g, ' ')
+                .trim();
+            }
+
+            if (start > 0) snippetText = '...' + snippetText;
+            if (end < targetText.length) snippetText = snippetText + '...';
+
+            const matchIndexInSnippet = snippetText.toLowerCase().indexOf(keyword.toLowerCase());
+
+            snippets.push({
+              id: `snip-${keyword}-${snippets.length}-${matchIndex}`,
+              keyword,
+              text: snippetText,
+              matchIndexInSnippet: matchIndexInSnippet >= 0 ? matchIndexInSnippet : 0,
+              matchLength,
+              location: loc
+            });
+          }
+
+          if (match.index === pattern.lastIndex) {
+            pattern.lastIndex++;
+          }
         }
+      } catch (err: any) {
+        console.error(`Error matching keyword "${keyword}":`, err.message);
       }
-    } catch (err: any) {
-      console.error(`Error matching keyword "${keyword}":`, err.message);
+    };
+
+    // 1. Search visible page text
+    runPatternSearch(visibleText, 'visible');
+
+    // 2. Search SSR / JSON hydration script text
+    if (jsonText.trim().length > 0) {
+      runPatternSearch(jsonText, 'raw_code');
+    }
+
+    // 3. Fallback search on raw HTML if no matches found yet
+    if (visibleCount === 0 && rawCodeCount === 0 && rawHtml) {
+      runPatternSearch(rawHtml, 'raw_code');
+    }
+
+    const count = visibleCount + rawCodeCount;
+    let foundIn: 'visible' | 'raw_code' | 'both' = 'visible';
+    if (visibleCount > 0 && rawCodeCount > 0) {
+      foundIn = 'both';
+    } else if (rawCodeCount > 0) {
+      foundIn = 'raw_code';
     }
 
     keywordMatches[keyword] = {
       keyword,
       count,
-      snippets
+      snippets,
+      foundIn
     };
 
     totalMatches += count;
@@ -342,8 +390,8 @@ app.post('/api/fetch-and-search', async (req, res) => {
       };
     }
 
-    const { title, metaDescription, textContent, wordCount } = parseHtmlContent(fetchRes.html || '');
-    const { keywordMatches, totalMatches } = searchKeywordsInText(textContent, targetKw, searchOpts);
+    const { title, metaDescription, visibleText, jsonText, textContent, wordCount } = parseHtmlContent(fetchRes.html || '');
+    const { keywordMatches, totalMatches } = searchKeywordsInText(visibleText, targetKw, searchOpts, jsonText, fetchRes.html || '');
 
     const foundKeywords = targetKw.filter(kw => (keywordMatches[kw]?.count || 0) > 0);
     const notFoundKeywords = targetKw.filter(kw => !keywordMatches[kw] || (keywordMatches[kw]?.count || 0) === 0);

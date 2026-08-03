@@ -72,6 +72,9 @@ export const SearchControls: React.FC<SearchControlsProps> = ({
   const [globalKwInput, setGlobalKwInput] = useState<string>('');
   const [showGlobalBulkText, setShowGlobalBulkText] = useState<boolean>(false);
   const [globalBulkText, setGlobalBulkText] = useState<string>('');
+  const [showGlobalFileUpload, setShowGlobalFileUpload] = useState<boolean>(false);
+
+  const globalFileInputRef = useRef<HTMLInputElement>(null);
 
   // Per-target keyword inputs
   const [targetKwInputs, setTargetKwInputs] = useState<Record<string, string>>({});
@@ -253,10 +256,10 @@ export const SearchControls: React.FC<SearchControlsProps> = ({
         }
       }
 
-      // Format keywords from string (comma, semicolon or slash separated)
+      // Format keywords from string (comma, semicolon, pipe or tab separated - preserve slashes in keywords)
       const kws = kwString
         ? kwString
-            .split(/[,;/]+/)
+            .split(/[,;\t|]+/)
             .map(k => k.trim())
             .filter(k => k.length > 0)
         : [];
@@ -384,6 +387,174 @@ https://react.dev\tcomponent, hooks, state, JSX
 
   const handleRemoveGlobalKeyword = (kwToRemove: string) => {
     setGlobalKeywords(globalKeywords.filter(k => k !== kwToRemove));
+  };
+
+  // Convert Global Mode URLs & Keywords into URL-Keyword Mapped Targets without running search (Merging with existing targets)
+  const handleConvertToMappedTargets = () => {
+    const parsedUrls = urlsText
+      .split('\n')
+      .map(u => u.trim())
+      .filter(u => u.length > 0);
+
+    let activeKws = [...globalKeywords];
+    if (activeKws.length === 0 && globalBulkText.trim()) {
+      activeKws = Array.from(
+        new Set(
+          globalBulkText
+            .split(/[,;\r\n\t|]+/)
+            .map(k => k.trim())
+            .filter(k => k.length > 0)
+        )
+      );
+      setGlobalKeywords(activeKws);
+    }
+
+    if (parsedUrls.length === 0) {
+      alert('الرجاء إدخال رابط واحد على الأقل في قائمة الـ URLs لتحويلها إلى Mapped Targets.');
+      return;
+    }
+
+    if (activeKws.length === 0) {
+      alert('الرجاء إدخال كلمة مفتاحية واحدة على الأقل لربطها بالروابط.');
+      return;
+    }
+
+    // Build unique target map initialized with existing targets to append/merge rather than overwrite!
+    const targetMap = new Map<string, { id?: string; url: string; keywordsSet: Set<string> }>();
+
+    targets.forEach((t, idx) => {
+      const url = t.url.trim();
+      if (!url) return;
+      const key = normalizeUrlKey(url);
+      if (targetMap.has(key)) {
+        const existing = targetMap.get(key)!;
+        t.keywords.forEach(k => existing.keywordsSet.add(k));
+      } else {
+        targetMap.set(key, {
+          id: t.id || `target-${Date.now()}-${idx}`,
+          url: t.url,
+          keywordsSet: new Set<string>(t.keywords)
+        });
+      }
+    });
+
+    parsedUrls.forEach((url) => {
+      const key = normalizeUrlKey(url);
+      if (targetMap.has(key)) {
+        const existing = targetMap.get(key)!;
+        activeKws.forEach(k => existing.keywordsSet.add(k));
+      } else {
+        targetMap.set(key, {
+          id: `converted-target-${Date.now()}-${targetMap.size}`,
+          url,
+          keywordsSet: new Set(activeKws)
+        });
+      }
+    });
+
+    const newTargets: UrlTargetItem[] = Array.from(targetMap.values()).map((item) => ({
+      id: item.id || `target-${Date.now()}`,
+      url: item.url,
+      keywords: Array.from(item.keywordsSet)
+    }));
+
+    setTargets(newTargets);
+    setSearchMode('mapped');
+    setImportStatus(
+      `تم دمج وربط ${parsedUrls.length} رابط مع ${activeKws.length} كلمة مفتاحية دون إزالة الأهداف السابقة (الإجمالي: ${newTargets.length} رابط مستهدف).`
+    );
+  };
+
+  // Handle File Upload in Global Mode (Col 1: Webpage URLs, Col 2: Global Keywords)
+  const handleGlobalFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      const content = evt.target?.result as string;
+      if (content) {
+        const lines = content.split(/\r?\n/);
+        const urlList: string[] = [];
+        const kwSet = new Set<string>();
+
+        lines.forEach((line) => {
+          const trimmed = line.trim();
+          if (!trimmed || trimmed.startsWith('#')) return;
+
+          let url = '';
+          let kwString = '';
+
+          if (trimmed.includes('\t')) {
+            const parts = trimmed.split('\t');
+            url = parts[0].trim();
+            kwString = parts.slice(1).join(' ').trim();
+          } else if (trimmed.includes('|')) {
+            const parts = trimmed.split('|');
+            url = parts[0].trim();
+            kwString = parts.slice(1).join(' ').trim();
+          } else if (trimmed.includes('->')) {
+            const parts = trimmed.split('->');
+            url = parts[0].trim();
+            kwString = parts.slice(1).join(' ').trim();
+          } else if (trimmed.includes(';')) {
+            const parts = trimmed.split(';');
+            url = parts[0].trim();
+            kwString = parts.slice(1).join(' ').trim();
+          } else if (trimmed.includes(',')) {
+            const firstCommaIndex = trimmed.indexOf(',');
+            url = trimmed.substring(0, firstCommaIndex).trim();
+            kwString = trimmed.substring(firstCommaIndex + 1).replace(/^["']|["']$/g, '').trim();
+          } else {
+            const spaceIndex = trimmed.search(/\s/);
+            if (spaceIndex !== -1) {
+              url = trimmed.substring(0, spaceIndex).trim();
+              kwString = trimmed.substring(spaceIndex + 1).trim();
+            } else {
+              url = trimmed;
+              kwString = '';
+            }
+          }
+
+          if (url) {
+            urlList.push(url);
+          }
+
+          if (kwString) {
+            const kws = kwString
+              .split(/[,;\t|]+/)
+              .map(k => k.trim())
+              .filter(k => k.length > 0);
+            kws.forEach(k => kwSet.add(k));
+          }
+        });
+
+        if (urlList.length > 0 || kwSet.size > 0) {
+          // Append URLs to existing urlsText
+          const currentUrls = urlsText
+            ? urlsText.split('\n').map(u => u.trim()).filter(Boolean)
+            : [];
+          const mergedUrls = Array.from(new Set([...currentUrls, ...urlList]));
+          setUrlsText(mergedUrls.join('\n'));
+
+          // Merge extracted keywords into globalKeywords & globalBulkText
+          const mergedKws = Array.from(new Set([...globalKeywords, ...Array.from(kwSet)]));
+          setGlobalKeywords(mergedKws);
+          setGlobalBulkText(mergedKws.join(', '));
+
+          setImportStatus(
+            `تم استخراج ${urlList.length} رابط من العمود الأول و ${kwSet.size} كلمة مفتاحية من العمود الثاني بنجاح من ملف ${file.name}.`
+          );
+          setShowGlobalFileUpload(false);
+          setSelectedPresetId(null);
+        } else {
+          alert('لم يتم العثور على أي روابط أو كلمات مفتاحية صالحة في الملف.');
+        }
+      }
+    };
+    reader.readAsText(file);
+
+    if (globalFileInputRef.current) globalFileInputRef.current.value = '';
   };
 
   // Submit
@@ -809,8 +980,93 @@ https://react.dev\tcomponent, hooks, state, JSX
           </div>
         ) : (
           /* MODE 2: Global Keywords Mode */
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-            {/* Section 1: Webpage URLs Input */}
+          <div className="space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-2 p-3 bg-blue-500/10 border border-blue-500/20 rounded-xl">
+              <div className="text-xs text-blue-400 font-mono">
+                💡 <strong>Global Keywords Mode:</strong> Enter URLs & Keywords, then search across all URLs or convert them into specific URL-Keyword Mapped targets without running search.
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowGlobalFileUpload(!showGlobalFileUpload)}
+                  className="px-3 py-1.5 rounded-lg text-xs font-mono font-bold bg-emerald-600 hover:bg-emerald-500 text-white shadow-xs transition-all flex items-center gap-1.5"
+                  title="Upload CSV or Text File with Column 1 = URLs, Column 2 = Keywords"
+                >
+                  <UploadCloud className="w-3.5 h-3.5" />
+                  <span>Upload File (Col 1: URLs | Col 2: Keywords)</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleConvertToMappedTargets}
+                  className="px-3 py-1.5 rounded-lg text-xs font-mono font-bold bg-blue-600 hover:bg-blue-500 text-white shadow-xs transition-all flex items-center gap-1.5"
+                  title="Map these Global Keywords to each URL and switch to URL-Keyword Mapping mode without executing search"
+                >
+                  <Link2 className="w-3.5 h-3.5" />
+                  <span>Map Keywords to URLs (No Search)</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Global File Upload Drawer */}
+            {showGlobalFileUpload && (
+              <div className={
+                isDark
+                  ? "bg-zinc-950 rounded-2xl p-4 sm:p-5 border border-emerald-500/30 space-y-4 font-mono text-xs animate-in fade-in zoom-in-95 duration-150"
+                  : "bg-slate-50 rounded-2xl p-4 sm:p-5 border border-emerald-500/40 space-y-4 font-mono text-xs animate-in fade-in zoom-in-95 duration-150"
+              }>
+                <div className={isDark ? "flex items-start justify-between gap-2 border-b border-zinc-800 pb-3" : "flex items-start justify-between gap-2 border-b border-slate-200 pb-3"}>
+                  <div>
+                    <h4 className={isDark ? "font-bold text-zinc-100 flex items-center gap-2 text-sm" : "font-bold text-slate-900 flex items-center gap-2 text-sm"}>
+                      <FileText className="w-4 h-4 text-emerald-500" />
+                      Import Text / CSV File for Global Keywords Mode
+                    </h4>
+                    <p className={isDark ? "text-zinc-400 mt-1" : "text-slate-500 mt-1"}>
+                      <strong>Column 1 = Webpage URLs</strong> (extracted into URLs box) | <strong>Column 2 = Keywords</strong> (extracted into Global Keywords list for all URLs)
+                    </p>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={handleDownloadSampleFile}
+                    className={
+                      isDark
+                        ? "px-2.5 py-1 rounded-lg bg-zinc-900 border border-zinc-800 text-zinc-300 hover:text-white hover:bg-zinc-800 transition-colors flex items-center gap-1 text-[11px]"
+                        : "px-2.5 py-1 rounded-lg bg-white border border-slate-200 text-slate-700 hover:text-slate-900 hover:bg-slate-100 transition-colors flex items-center gap-1 text-[11px]"
+                    }
+                  >
+                    <Download className="w-3.5 h-3.5 text-blue-500" />
+                    Download Sample File
+                  </button>
+                </div>
+
+                <div className={
+                  isDark
+                    ? "border-2 border-dashed border-emerald-500/30 hover:border-emerald-500/60 rounded-xl p-6 text-center bg-zinc-900/50 hover:bg-zinc-900 transition-all cursor-pointer"
+                    : "border-2 border-dashed border-emerald-500/40 hover:border-emerald-500/70 rounded-xl p-6 text-center bg-white hover:bg-emerald-50/50 transition-all cursor-pointer"
+                }>
+                  <input
+                    ref={globalFileInputRef}
+                    type="file"
+                    accept=".txt,.csv,.tsv,.text"
+                    onChange={handleGlobalFileUpload}
+                    className="hidden"
+                    id="global-txt-csv-file-input"
+                  />
+                  <label htmlFor="global-txt-csv-file-input" className="cursor-pointer block space-y-2">
+                    <UploadCloud className="w-8 h-8 mx-auto text-emerald-500 opacity-80" />
+                    <div className={isDark ? "text-sm font-bold text-zinc-200" : "text-sm font-bold text-slate-800"}>
+                      Click to choose or drop text file (.txt, .csv, .tsv)
+                    </div>
+                    <div className={isDark ? "text-zinc-500 text-[11px]" : "text-slate-500 text-[11px]"}>
+                      Supports Tab, Comma, Pipe, or Semicolon separated columns
+                    </div>
+                  </label>
+                </div>
+              </div>
+            )}
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+              {/* Section 1: Webpage URLs Input */}
             <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <label className={isDark ? "text-xs font-semibold uppercase tracking-wider text-zinc-300 flex items-center gap-1.5 font-mono" : "text-xs font-semibold uppercase tracking-wider text-slate-700 flex items-center gap-1.5 font-mono"}>
@@ -905,6 +1161,7 @@ https://react.dev\tcomponent, hooks, state, JSX
               )}
             </div>
           </div>
+        </div>
         )}
 
         {/* Options & Search Action Row */}
@@ -999,6 +1256,18 @@ https://react.dev\tcomponent, hooks, state, JSX
                   <span>Stop</span>
                 </button>
               </div>
+            )}
+
+            {searchMode === 'global' && !isLoading && (
+              <button
+                type="button"
+                onClick={handleConvertToMappedTargets}
+                className="w-full sm:w-auto px-4 py-2.5 rounded-xl font-semibold text-xs bg-indigo-500/15 hover:bg-indigo-500/25 text-indigo-400 border border-indigo-500/30 transition-all flex items-center justify-center gap-1.5 font-mono"
+                title="Convert Global URLs and Keywords to Mapped Targets without running search"
+              >
+                <Link2 className="w-4 h-4 text-indigo-400" />
+                <span>Map to URLs (No Search)</span>
+              </button>
             )}
 
             <button

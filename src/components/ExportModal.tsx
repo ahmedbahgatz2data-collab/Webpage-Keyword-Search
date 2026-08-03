@@ -39,6 +39,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
       'Status',
       'Searched Keywords',
       'Status Found or Not Found',
+      'Found Location',
       'Total Matches',
       'Word Count',
       'Fetch Time (ms)',
@@ -55,17 +56,21 @@ export const ExportModal: React.FC<ExportModalProps> = ({
         const matchCount = km?.count || 0;
         const isFound = matchCount > 0;
         const statusFoundOrNot = p.status === 'error' ? 'Error' : isFound ? 'Found' : 'Not found';
+        const foundIn = km?.foundIn;
+        const foundLocationText = !isFound ? '-' : foundIn === 'visible' ? 'Visible Page' : foundIn === 'raw_code' ? 'Raw Code / SSR Data' : 'Both (Visible & Raw Code)';
         const snippets = km?.snippets || [];
 
         if (snippets.length > 0) {
           snippets.forEach(s => {
             const snippetText = s.text.replace(/[\r\n]+/g, ' ');
+            const snipLocText = s.location === 'raw_code' ? 'Raw Code' : 'Visible Page';
             rows.push([
               `"${p.url.replace(/"/g, '""')}"`,
               `"${(p.title || 'Untitled').replace(/"/g, '""')}"`,
               p.status === 'error' ? 'Error' : '200 OK',
               `"${kw.replace(/"/g, '""')}"`,
               `"${statusFoundOrNot}"`,
+              `"${snipLocText}"`,
               matchCount,
               p.wordCount || 0,
               p.fetchTimeMs || 0,
@@ -79,6 +84,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
             p.status === 'error' ? 'Error' : '200 OK',
             `"${kw.replace(/"/g, '""')}"`,
             `"${statusFoundOrNot}"`,
+            `"${foundLocationText}"`,
             matchCount,
             p.wordCount || 0,
             p.fetchTimeMs || 0,
@@ -105,8 +111,8 @@ export const ExportModal: React.FC<ExportModalProps> = ({
     md += `**Total Webpages:** ${results.length}\n`;
     md += `**Total Keyword Occurrences:** ${results.reduce((a, b) => a + b.totalMatches, 0)}\n\n`;
     md += `## Detailed Results Table\n\n`;
-    md += `| URL | Title | Status | Searched Keywords | Status Found or Not Found | Total Matches | Word Count | Fetch Time (ms) | Context Snippets |\n`;
-    md += `| --- | --- | --- | --- | --- | --- | --- | --- | --- |\n`;
+    md += `| URL | Title | Status | Searched Keywords | Status Found or Not Found | Found Location | Total Matches | Word Count | Fetch Time (ms) | Context Snippets |\n`;
+    md += `| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |\n`;
 
     results.forEach(p => {
       const targetKws = p.targetKeywords && p.targetKeywords.length > 0 ? p.targetKeywords : keywords;
@@ -116,15 +122,18 @@ export const ExportModal: React.FC<ExportModalProps> = ({
         const matchCount = km?.count || 0;
         const isFound = matchCount > 0;
         const statusFoundOrNot = p.status === 'error' ? 'Error' : isFound ? 'Found' : 'Not found';
+        const foundIn = km?.foundIn;
+        const foundLocationText = !isFound ? '-' : foundIn === 'visible' ? 'Visible Page' : foundIn === 'raw_code' ? 'Raw Code / SSR Data' : 'Both';
         const snippets = km?.snippets || [];
 
         if (snippets.length > 0) {
           snippets.forEach(s => {
             const snippetText = s.text.replace(/[\r\n]+/g, ' ');
-            md += `| ${p.url} | ${p.title || 'Untitled'} | ${p.status === 'error' ? 'Error' : '200 OK'} | ${kw} | ${statusFoundOrNot} | ${matchCount} | ${p.wordCount || 0} | ${p.fetchTimeMs || 0} | ${snippetText.slice(0, 120)} |\n`;
+            const snipLocText = s.location === 'raw_code' ? 'Raw Code' : 'Visible Page';
+            md += `| ${p.url} | ${p.title || 'Untitled'} | ${p.status === 'error' ? 'Error' : '200 OK'} | ${kw} | ${statusFoundOrNot} | ${snipLocText} | ${matchCount} | ${p.wordCount || 0} | ${p.fetchTimeMs || 0} | ${snippetText.slice(0, 120)} |\n`;
           });
         } else {
-          md += `| ${p.url} | ${p.title || 'Untitled'} | ${p.status === 'error' ? 'Error' : '200 OK'} | ${kw} | ${statusFoundOrNot} | ${matchCount} | ${p.wordCount || 0} | ${p.fetchTimeMs || 0} | - |\n`;
+          md += `| ${p.url} | ${p.title || 'Untitled'} | ${p.status === 'error' ? 'Error' : '200 OK'} | ${kw} | ${statusFoundOrNot} | ${foundLocationText} | ${matchCount} | ${p.wordCount || 0} | ${p.fetchTimeMs || 0} | - |\n`;
         }
       });
     });
