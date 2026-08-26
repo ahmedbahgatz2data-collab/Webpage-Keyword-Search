@@ -40,6 +40,8 @@ export const ExportModal: React.FC<ExportModalProps> = ({
       'Searched Keywords',
       'Status Found or Not Found',
       'Found Location',
+      'Section / DOM Breadcrumb',
+      'Context Type',
       'Total Matches',
       'Word Count',
       'Fetch Time (ms)',
@@ -49,28 +51,44 @@ export const ExportModal: React.FC<ExportModalProps> = ({
     const rows: string[] = [];
 
     results.forEach(p => {
-      const targetKws = p.targetKeywords && p.targetKeywords.length > 0 ? p.targetKeywords : keywords;
+      const isError = p.status === 'error';
+      const targetKws = p.targetKeywords && p.targetKeywords.length > 0
+        ? p.targetKeywords
+        : (keywords && keywords.length > 0 ? keywords : ['-']);
+
+      const httpStatusText = p.httpStatus ? `HTTP ${p.httpStatus}` : '';
+      const errorReason = p.errorMessage || 'Failed to fetch / Empty';
+      const statusText = isError ? `Error${httpStatusText ? ` (${httpStatusText})` : ''}` : '200 OK';
 
       targetKws.forEach(kw => {
         const km = p.keywordMatches?.[kw];
         const matchCount = km?.count || 0;
         const isFound = matchCount > 0;
-        const statusFoundOrNot = p.status === 'error' ? 'Error' : isFound ? 'Found' : 'Not found';
+        const statusFoundOrNot = isError
+          ? `Failed: ${errorReason}`
+          : isFound
+          ? 'Found'
+          : 'Not found';
+
         const foundIn = km?.foundIn;
-        const foundLocationText = !isFound ? '-' : foundIn === 'visible' ? 'Visible Page' : foundIn === 'raw_code' ? 'Raw Code / SSR Data' : 'Both (Visible & Raw Code)';
+        const foundLocationText = !isFound || isError ? '-' : foundIn === 'visible' ? 'Visible Page' : foundIn === 'raw_code' ? 'Raw Code / SSR Data' : 'Both (Visible & Raw Code)';
         const snippets = km?.snippets || [];
 
         if (snippets.length > 0) {
           snippets.forEach(s => {
             const snippetText = s.text.replace(/[\r\n]+/g, ' ');
             const snipLocText = s.location === 'raw_code' ? 'Raw Code' : 'Visible Page';
+            const domBreadcrumb = s.domPath || '-';
+            const ctxType = s.contextType || 'general';
             rows.push([
               `"${p.url.replace(/"/g, '""')}"`,
-              `"${(p.title || 'Untitled').replace(/"/g, '""')}"`,
-              p.status === 'error' ? 'Error' : '200 OK',
+              `"${(p.title || p.url || 'Untitled').replace(/"/g, '""')}"`,
+              `"${statusText}"`,
               `"${kw.replace(/"/g, '""')}"`,
               `"${statusFoundOrNot}"`,
               `"${snipLocText}"`,
+              `"${domBreadcrumb.replace(/"/g, '""')}"`,
+              `"${ctxType}"`,
               matchCount,
               p.wordCount || 0,
               p.fetchTimeMs || 0,
@@ -80,15 +98,17 @@ export const ExportModal: React.FC<ExportModalProps> = ({
         } else {
           rows.push([
             `"${p.url.replace(/"/g, '""')}"`,
-            `"${(p.title || 'Untitled').replace(/"/g, '""')}"`,
-            p.status === 'error' ? 'Error' : '200 OK',
+            `"${(p.title || p.url || 'Untitled').replace(/"/g, '""')}"`,
+            `"${statusText}"`,
             `"${kw.replace(/"/g, '""')}"`,
             `"${statusFoundOrNot}"`,
             `"${foundLocationText}"`,
+            `"-"`,
+            `"-"`,
             matchCount,
             p.wordCount || 0,
             p.fetchTimeMs || 0,
-            `"-"`
+            isError ? `"${errorReason.replace(/"/g, '""')}"` : `"-"`
           ].join(','));
         }
       });
@@ -109,31 +129,44 @@ export const ExportModal: React.FC<ExportModalProps> = ({
     let md = `# Webpage Keyword Search Report\n\n`;
     md += `**Date:** ${new Date().toLocaleString()}\n`;
     md += `**Total Webpages:** ${results.length}\n`;
+    md += `**Successful:** ${results.filter(r => r.status === 'success').length} | **Failed/Errors:** ${results.filter(r => r.status === 'error').length}\n`;
     md += `**Total Keyword Occurrences:** ${results.reduce((a, b) => a + b.totalMatches, 0)}\n\n`;
     md += `## Detailed Results Table\n\n`;
     md += `| URL | Title | Status | Searched Keywords | Status Found or Not Found | Found Location | Total Matches | Word Count | Fetch Time (ms) | Context Snippets |\n`;
     md += `| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |\n`;
 
     results.forEach(p => {
-      const targetKws = p.targetKeywords && p.targetKeywords.length > 0 ? p.targetKeywords : keywords;
+      const isError = p.status === 'error';
+      const targetKws = p.targetKeywords && p.targetKeywords.length > 0
+        ? p.targetKeywords
+        : (keywords && keywords.length > 0 ? keywords : ['-']);
+
+      const httpStatusText = p.httpStatus ? `HTTP ${p.httpStatus}` : '';
+      const errorReason = p.errorMessage || 'Failed to fetch / Empty';
+      const statusText = isError ? `Error${httpStatusText ? ` (${httpStatusText})` : ''}` : '200 OK';
 
       targetKws.forEach(kw => {
         const km = p.keywordMatches?.[kw];
         const matchCount = km?.count || 0;
         const isFound = matchCount > 0;
-        const statusFoundOrNot = p.status === 'error' ? 'Error' : isFound ? 'Found' : 'Not found';
+        const statusFoundOrNot = isError
+          ? `Failed: ${errorReason}`
+          : isFound
+          ? 'Found'
+          : 'Not found';
+
         const foundIn = km?.foundIn;
-        const foundLocationText = !isFound ? '-' : foundIn === 'visible' ? 'Visible Page' : foundIn === 'raw_code' ? 'Raw Code / SSR Data' : 'Both';
+        const foundLocationText = !isFound || isError ? '-' : foundIn === 'visible' ? 'Visible Page' : foundIn === 'raw_code' ? 'Raw Code / SSR Data' : 'Both';
         const snippets = km?.snippets || [];
 
         if (snippets.length > 0) {
           snippets.forEach(s => {
             const snippetText = s.text.replace(/[\r\n]+/g, ' ');
             const snipLocText = s.location === 'raw_code' ? 'Raw Code' : 'Visible Page';
-            md += `| ${p.url} | ${p.title || 'Untitled'} | ${p.status === 'error' ? 'Error' : '200 OK'} | ${kw} | ${statusFoundOrNot} | ${snipLocText} | ${matchCount} | ${p.wordCount || 0} | ${p.fetchTimeMs || 0} | ${snippetText.slice(0, 120)} |\n`;
+            md += `| ${p.url} | ${p.title || p.url || 'Untitled'} | ${statusText} | ${kw} | ${statusFoundOrNot} | ${snipLocText} | ${matchCount} | ${p.wordCount || 0} | ${p.fetchTimeMs || 0} | ${snippetText.slice(0, 120)} |\n`;
           });
         } else {
-          md += `| ${p.url} | ${p.title || 'Untitled'} | ${p.status === 'error' ? 'Error' : '200 OK'} | ${kw} | ${statusFoundOrNot} | ${foundLocationText} | ${matchCount} | ${p.wordCount || 0} | ${p.fetchTimeMs || 0} | - |\n`;
+          md += `| ${p.url} | ${p.title || p.url || 'Untitled'} | ${statusText} | ${kw} | ${statusFoundOrNot} | ${foundLocationText} | ${matchCount} | ${p.wordCount || 0} | ${p.fetchTimeMs || 0} | ${isError ? errorReason : '-'} |\n`;
         }
       });
     });

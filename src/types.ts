@@ -4,6 +4,8 @@ export interface SearchOptions {
   useRegex: boolean;
   contextLength: number; // characters before and after match
   stealthMode?: boolean; // Anti-bot / modern Chrome browser headers bypass mode
+  autoDownload?: boolean; // Automatically download CSV report upon scan completion
+  smartContext?: boolean; // Sentence boundary, Table row key-value, DOM breadcrumb, noise stripping
 }
 
 export interface Snippet {
@@ -13,6 +15,8 @@ export interface Snippet {
   matchIndexInSnippet: number; // position within snippet
   matchLength: number;
   location?: 'visible' | 'raw_code'; // 'visible' = Visible Page Text, 'raw_code' = Raw Code / SSR Data
+  domPath?: string; // DOM Breadcrumb / Section Context (e.g. "Main > Specifications > Table > Row 3")
+  contextType?: 'sentence' | 'paragraph' | 'table_row' | 'key_value' | 'list_item' | 'heading' | 'raw_code' | 'general';
 }
 
 export interface KeywordMatch {
@@ -43,6 +47,8 @@ export interface UrlKeywordTarget {
   id: string;
   url: string;
   keywords: string[];
+  rawHtml?: string;
+  isLocalHtml?: boolean;
 }
 
 export interface SearchRequest {

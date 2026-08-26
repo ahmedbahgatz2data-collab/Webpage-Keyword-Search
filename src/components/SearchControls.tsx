@@ -19,7 +19,8 @@ import {
   Play,
   Square,
   XCircle,
-  ShieldCheck
+  ShieldCheck,
+  Sparkles
 } from 'lucide-react';
 import { SearchOptions, PresetSample } from '../types';
 import { SAMPLE_PRESETS } from '../data/presets';
@@ -28,6 +29,8 @@ interface UrlTargetItem {
   id: string;
   url: string;
   keywords: string[];
+  rawHtml?: string;
+  isLocalHtml?: boolean;
 }
 
 interface SearchControlsProps {
@@ -62,9 +65,53 @@ export const SearchControls: React.FC<SearchControlsProps> = ({
   const [bulkMappedText, setBulkMappedText] = useState<string>('');
   const [showBulkText, setShowBulkText] = useState<boolean>(false);
   const [showFileUpload, setShowFileUpload] = useState<boolean>(false);
+  const [showHtmlUpload, setShowHtmlUpload] = useState<boolean>(false);
   const [importStatus, setImportStatus] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const htmlFileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleHtmlFilesUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+
+    let processedCount = 0;
+    const newTargets: UrlTargetItem[] = [];
+
+    Array.from(files).forEach((fileItem, idx) => {
+      const file = fileItem as File;
+      const reader = new FileReader();
+      reader.onload = (evt) => {
+        const content = evt.target?.result as string;
+        if (content) {
+          const titleMatch = content.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+          const fileTitle = titleMatch ? titleMatch[1].replace(/[\r\n\t]+/g, ' ').trim() : file.name;
+
+          const kws = globalKeywords.length > 0 ? [...globalKeywords] : ['search'];
+
+          newTargets.push({
+            id: `html-file-${Date.now()}-${idx}-${Math.random()}`,
+            url: `file://${file.name} (${fileTitle})`,
+            keywords: kws,
+            rawHtml: content,
+            isLocalHtml: true
+          });
+
+          processedCount++;
+          if (processedCount === files.length) {
+            setTargets(prev => [...prev, ...newTargets]);
+            setSearchMode('mapped');
+            setShowHtmlUpload(false);
+            const totalKeywords = newTargets.reduce((sum, t) => sum + t.keywords.length, 0);
+            setImportStatus(`Successfully uploaded ${newTargets.length} local HTML file(s) with ${totalKeywords} mapped keywords. Ready to scan!`);
+          }
+        }
+      };
+      reader.readAsText(file);
+    });
+
+    if (htmlFileInputRef.current) htmlFileInputRef.current.value = '';
+  };
 
   // Global State - Empty Defaults
   const [urlsText, setUrlsText] = useState<string>('');
@@ -563,29 +610,31 @@ https://react.dev\tcomponent, hooks, state, JSX
 
     if (searchMode === 'mapped') {
       // Auto-merge any duplicate URLs before search
-      const targetMap = new Map<string, { url: string; keywordsSet: Set<string> }>();
+      const targetMap = new Map<string, { url: string; keywordsSet: Set<string>; rawHtml?: string; isLocalHtml?: boolean }>();
 
       targets.forEach(t => {
         const url = t.url.trim();
-        if (!url) return;
-        const key = normalizeUrlKey(url);
+        if (!url && !t.rawHtml) return;
+        const key = normalizeUrlKey(url || 'local-html');
         if (targetMap.has(key)) {
           const existing = targetMap.get(key)!;
           t.keywords.forEach(k => existing.keywordsSet.add(k));
         } else {
-          targetMap.set(key, { url, keywordsSet: new Set(t.keywords) });
+          targetMap.set(key, { url, keywordsSet: new Set(t.keywords), rawHtml: t.rawHtml, isLocalHtml: t.isLocalHtml });
         }
       });
 
       const validTargets = Array.from(targetMap.values())
         .map(t => ({
           url: t.url,
-          keywords: Array.from(t.keywordsSet)
+          keywords: Array.from(t.keywordsSet),
+          rawHtml: t.rawHtml,
+          isLocalHtml: t.isLocalHtml
         }))
-        .filter(t => t.url.length > 0 && t.keywords.length > 0);
+        .filter(t => (t.rawHtml || t.url.length > 0) && t.keywords.length > 0);
 
       if (validTargets.length === 0) {
-        alert('Please add or import at least one URL with mapped keywords.');
+        alert('Please add or import at least one URL or local HTML file with mapped keywords.');
         return;
       }
 
@@ -713,6 +762,17 @@ https://react.dev\tcomponent, hooks, state, JSX
                   <span>Upload Text/CSV File</span>
                 </button>
 
+                {/* HTML File Upload Button */}
+                <button
+                  type="button"
+                  onClick={() => setShowHtmlUpload(!showHtmlUpload)}
+                  className="text-xs text-blue-500 hover:text-blue-600 transition-colors flex items-center gap-1 font-mono bg-blue-500/10 px-2.5 py-1 rounded-lg border border-blue-500/20"
+                  title="Upload local .html or .htm files to scan"
+                >
+                  <Code2 className="w-3.5 h-3.5" />
+                  <span>{showHtmlUpload ? 'Hide HTML Upload' : 'Upload Local HTML File'}</span>
+                </button>
+
                 {/* Bulk Paste Button */}
                 <button
                   type="button"
@@ -814,6 +874,53 @@ https://react.dev\tcomponent, hooks, state, JSX
               </div>
             )}
 
+            {/* HTML File Upload Drawer / Dropzone */}
+            {showHtmlUpload && (
+              <div className={
+                isDark
+                  ? "bg-zinc-950 rounded-2xl p-4 sm:p-5 border border-blue-500/30 space-y-4 font-mono text-xs animate-in fade-in zoom-in-95 duration-150"
+                  : "bg-slate-50 rounded-2xl p-4 sm:p-5 border border-blue-500/40 space-y-4 font-mono text-xs animate-in fade-in zoom-in-95 duration-150"
+              }>
+                <div className={isDark ? "flex items-start justify-between gap-2 border-b border-zinc-800 pb-3" : "flex items-start justify-between gap-2 border-b border-slate-200 pb-3"}>
+                  <div>
+                    <h4 className={isDark ? "font-bold text-zinc-100 flex items-center gap-2 text-sm" : "font-bold text-slate-900 flex items-center gap-2 text-sm"}>
+                      <Code2 className="w-4 h-4 text-blue-500" />
+                      Upload Local HTML Files (.html, .htm)
+                    </h4>
+                    <p className={isDark ? "text-zinc-400 mt-1" : "text-slate-500 mt-1"}>
+                      Select one or multiple local HTML files to analyze and search keywords against instantly.
+                    </p>
+                  </div>
+                </div>
+
+                {/* Dropzone input */}
+                <div className={
+                  isDark
+                    ? "border-2 border-dashed border-blue-500/30 hover:border-blue-500/60 rounded-xl p-6 text-center bg-zinc-900/50 hover:bg-zinc-900 transition-all cursor-pointer"
+                    : "border-2 border-dashed border-blue-500/40 hover:border-blue-500/70 rounded-xl p-6 text-center bg-white hover:bg-blue-50/50 transition-all cursor-pointer"
+                }>
+                  <input
+                    ref={htmlFileInputRef}
+                    type="file"
+                    accept=".html,.htm"
+                    multiple
+                    onChange={handleHtmlFilesUpload}
+                    className="hidden"
+                    id="html-files-file-input"
+                  />
+                  <label htmlFor="html-files-file-input" className="cursor-pointer block space-y-2">
+                    <Code2 className="w-8 h-8 mx-auto text-blue-500 opacity-80" />
+                    <div className={isDark ? "text-sm font-bold text-zinc-200" : "text-sm font-bold text-slate-800"}>
+                      Click to choose or drop local .html / .htm files
+                    </div>
+                    <div className={isDark ? "text-zinc-500 text-[11px]" : "text-slate-500 text-[11px]"}>
+                      Files will be added as target pages with mapped keywords automatically
+                    </div>
+                  </label>
+                </div>
+              </div>
+            )}
+
             {/* Bulk Paste Drawer */}
             {showBulkText && (
               <div className={isDark ? "bg-zinc-950 rounded-xl p-4 border border-zinc-800 space-y-3 font-mono text-xs" : "bg-slate-50 rounded-xl p-4 border border-slate-200 space-y-3 font-mono text-xs"}>
@@ -875,6 +982,12 @@ https://react.dev\tcomponent, hooks, state, JSX
                         }>
                           {idx + 1}
                         </span>
+                        {target.isLocalHtml && (
+                          <span className="px-2 py-1 bg-blue-500/10 text-blue-500 border border-blue-500/30 rounded-lg text-xs font-mono font-bold shrink-0 flex items-center gap-1">
+                            <Code2 className="w-3 h-3" />
+                            <span>HTML File</span>
+                          </span>
+                        )}
                         <input
                           type="text"
                           value={target.url}
@@ -1187,6 +1300,19 @@ https://react.dev\tcomponent, hooks, state, JSX
               <span className={isDark ? "text-zinc-300" : "text-slate-700"}>Exact Phrase</span>
             </label>
 
+            <label className="inline-flex items-center gap-1.5 cursor-pointer select-none bg-amber-500/10 px-2 py-1 rounded-lg border border-amber-500/20" title="استخراج السياق الذكي: حدود الجمل، بيانات الجداول والمواصفات، ومسار العنصر بالصفحة DOM Breadcrumb">
+              <input
+                type="checkbox"
+                checked={options.smartContext !== false}
+                onChange={(e) => setOptions({ ...options, smartContext: e.target.checked })}
+                className="w-4 h-4 bg-zinc-950 border-zinc-800 text-amber-500 rounded focus:ring-amber-500"
+              />
+              <span className="text-amber-500 font-semibold flex items-center gap-1">
+                <Sparkles className="w-3.5 h-3.5" />
+                <span>Smart Context (DOM & Tables)</span>
+              </span>
+            </label>
+
             <label className="inline-flex items-center gap-1.5 cursor-pointer select-none bg-emerald-500/10 px-2 py-1 rounded-lg border border-emerald-500/20" title="Uses browser-like Sec-Ch-Ua headers & Googlebot fallbacks to bypass WAF & 403 Forbidden blocks">
               <input
                 type="checkbox"
@@ -1197,6 +1323,19 @@ https://react.dev\tcomponent, hooks, state, JSX
               <span className="text-emerald-500 font-semibold flex items-center gap-1">
                 <ShieldCheck className="w-3.5 h-3.5" />
                 <span>Stealth Mode (403 Bypass)</span>
+              </span>
+            </label>
+
+            <label className="inline-flex items-center gap-1.5 cursor-pointer select-none bg-blue-500/10 px-2 py-1 rounded-lg border border-blue-500/20" title="Automatically download CSV report when scan finishes">
+              <input
+                type="checkbox"
+                checked={options.autoDownload !== false}
+                onChange={(e) => setOptions({ ...options, autoDownload: e.target.checked })}
+                className="w-4 h-4 bg-zinc-950 border-zinc-800 text-blue-500 rounded focus:ring-blue-500"
+              />
+              <span className="text-blue-500 font-semibold flex items-center gap-1">
+                <Download className="w-3.5 h-3.5" />
+                <span>Auto-Download Report</span>
               </span>
             </label>
 

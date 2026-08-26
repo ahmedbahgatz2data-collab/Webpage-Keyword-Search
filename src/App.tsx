@@ -6,6 +6,7 @@ import { PageTextModal } from './components/PageTextModal';
 import { AiAnalysisModal } from './components/AiAnalysisModal';
 import { SearchHistoryModal } from './components/SearchHistoryModal';
 import { ExportModal } from './components/ExportModal';
+import { UserGuideModal } from './components/UserGuideModal';
 import { PageResult, SearchOptions, SearchHistoryItem } from './types';
 import { AlertCircle, Sparkles, Globe, KeyRound, Eye, EyeOff, Trash2 } from 'lucide-react';
 
@@ -51,6 +52,7 @@ export default function App() {
   const [selectedPageForAi, setSelectedPageForAi] = useState<PageResult | null>(null);
   const [isHistoryOpen, setIsHistoryOpen] = useState<boolean>(false);
   const [isExportOpen, setIsExportOpen] = useState<boolean>(false);
+  const [isGuideOpen, setIsGuideOpen] = useState<boolean>(false);
 
   // Search History
   const [history, setHistory] = useState<SearchHistoryItem[]>([]);
@@ -118,6 +120,98 @@ export default function App() {
     setIsScanning(false);
   };
 
+  // Automatic CSV Export on Scan Completion
+  const triggerAutoCsvExport = (resultsToExport: PageResult[], keywordsToExport: string[]) => {
+    const headers = [
+      'URL',
+      'Title',
+      'Status',
+      'Searched Keywords',
+      'Status Found or Not Found',
+      'Found Location',
+      'Section / DOM Breadcrumb',
+      'Context Type',
+      'Total Matches',
+      'Word Count',
+      'Fetch Time (ms)',
+      'Context Snippets'
+    ];
+
+    const rows: string[] = [];
+
+    resultsToExport.forEach(p => {
+      const isError = p.status === 'error';
+      const targetKws = p.targetKeywords && p.targetKeywords.length > 0
+        ? p.targetKeywords
+        : (keywordsToExport && keywordsToExport.length > 0 ? keywordsToExport : ['-']);
+
+      const httpStatusText = p.httpStatus ? `HTTP ${p.httpStatus}` : '';
+      const errorReason = p.errorMessage || 'Failed to fetch / Empty';
+      const statusText = isError ? `Error${httpStatusText ? ` (${httpStatusText})` : ''}` : '200 OK';
+
+      targetKws.forEach(kw => {
+        const km = p.keywordMatches?.[kw];
+        const matchCount = km?.count || 0;
+        const isFound = matchCount > 0;
+        const statusFoundOrNot = isError
+          ? `Failed: ${errorReason}`
+          : isFound
+          ? 'Found'
+          : 'Not found';
+
+        const foundIn = km?.foundIn;
+        const foundLocationText = !isFound || isError ? '-' : foundIn === 'visible' ? 'Visible Page' : foundIn === 'raw_code' ? 'Raw Code / SSR Data' : 'Both (Visible & Raw Code)';
+        const snippets = km?.snippets || [];
+
+        if (snippets.length > 0) {
+          snippets.forEach(s => {
+            const snippetText = s.text.replace(/[\r\n]+/g, ' ');
+            const snipLocText = s.location === 'raw_code' ? 'Raw Code' : 'Visible Page';
+            const domBreadcrumb = s.domPath || '-';
+            const ctxType = s.contextType || 'general';
+            rows.push([
+              `"${p.url.replace(/"/g, '""')}"`,
+              `"${(p.title || p.url || 'Untitled').replace(/"/g, '""')}"`,
+              `"${statusText}"`,
+              `"${kw.replace(/"/g, '""')}"`,
+              `"${statusFoundOrNot}"`,
+              `"${snipLocText}"`,
+              `"${domBreadcrumb.replace(/"/g, '""')}"`,
+              `"${ctxType}"`,
+              matchCount,
+              p.wordCount || 0,
+              p.fetchTimeMs || 0,
+              `"${snippetText.replace(/"/g, '""')}"`
+            ].join(','));
+          });
+        } else {
+          rows.push([
+            `"${p.url.replace(/"/g, '""')}"`,
+            `"${(p.title || p.url || 'Untitled').replace(/"/g, '""')}"`,
+            `"${statusText}"`,
+            `"${kw.replace(/"/g, '""')}"`,
+            `"${statusFoundOrNot}"`,
+            `"${foundLocationText}"`,
+            `"-"`,
+            `"-"`,
+            matchCount,
+            p.wordCount || 0,
+            p.fetchTimeMs || 0,
+            isError ? `"${errorReason.replace(/"/g, '""')}"` : `"-"`
+          ].join(','));
+        }
+      });
+    });
+
+    const csvContent = [headers.join(','), ...rows].join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `keyword-search-report-${Date.now()}.csv`;
+    link.click();
+  };
+
   // Main Search Execution (Supports Progressive Scan + Pause / Resume)
   const handleExecuteSearch = async (
     searchData: { targets?: { url: string; keywords: string[] }[]; urls?: string[]; keywords?: string[] },
@@ -172,15 +266,21 @@ export default function App() {
       const currentTarget = targetList[i];
       setScanProgress({ current: i + 1, total: targetList.length, currentUrl: currentTarget.url });
 
+      const controller = new AbortController();
+      const abortTimeout = setTimeout(() => controller.abort(), 20000); // 20s overall safety abort
+
       try {
         const response = await fetch('/api/fetch-and-search', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
+          signal: controller.signal,
           body: JSON.stringify({
             targets: [currentTarget],
             options
           })
         });
+
+        clearTimeout(abortTimeout);
 
         if (!response.ok) {
           const errJson = await response.json().catch(() => ({}));
@@ -193,7 +293,24 @@ export default function App() {
         setResults([...accumulatedResults]);
         setSearchTimeMs(Date.now() - startTime);
       } catch (err: any) {
+        clearTimeout(abortTimeout);
         console.error('Scan error:', err);
+        const fallbackErrorResult: PageResult = {
+          url: currentTarget.url,
+          title: currentTarget.url,
+          status: 'error',
+          errorMessage: err.name === 'AbortError' ? 'Scan timed out after 20 seconds' : (err.message || 'Failed to scan webpage'),
+          targetKeywords: currentTarget.keywords,
+          foundKeywords: [],
+          notFoundKeywords: currentTarget.keywords,
+          keywordMatches: {},
+          wordCount: 0,
+          totalMatches: 0,
+          fetchTimeMs: 0
+        };
+        accumulatedResults = [...accumulatedResults, fallbackErrorResult];
+        setResults([...accumulatedResults]);
+        setSearchTimeMs(Date.now() - startTime);
       }
     }
 
@@ -203,6 +320,10 @@ export default function App() {
 
     const totalMatches = accumulatedResults.reduce((acc: number, p: PageResult) => acc + (p.totalMatches || 0), 0);
     saveSearchToHistory(allUrls, allKeywords, totalMatches, accumulatedResults.length);
+
+    if (options.autoDownload !== false && accumulatedResults.length > 0) {
+      triggerAutoCsvExport(accumulatedResults, allKeywords);
+    }
   };
 
   const handleRestoreSearch = (historyItem: SearchHistoryItem) => {
@@ -220,6 +341,7 @@ export default function App() {
       <Header
         onOpenHistory={() => setIsHistoryOpen(true)}
         onOpenExport={() => setIsExportOpen(true)}
+        onOpenGuide={() => setIsGuideOpen(true)}
         hasResults={results.length > 0}
         historyCount={history.length}
         theme={theme}
@@ -352,6 +474,12 @@ export default function App() {
         onClose={() => setIsExportOpen(false)}
         results={results}
         keywords={currentKeywords}
+      />
+
+      <UserGuideModal
+        isOpen={isGuideOpen}
+        onClose={() => setIsGuideOpen(false)}
+        isDark={isDark}
       />
     </div>
   );

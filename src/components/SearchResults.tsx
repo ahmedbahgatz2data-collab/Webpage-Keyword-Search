@@ -26,7 +26,8 @@ import {
   Link2,
   X,
   FileQuestion,
-  Trash2
+  Trash2,
+  Compass
 } from 'lucide-react';
 
 interface SearchResultsProps {
@@ -614,28 +615,65 @@ export const SearchResults: React.FC<SearchResultsProps> = ({
                         </td>
 
                         {/* 9. Context Snippets */}
-                        <td className="p-3.5 pr-4 max-w-[320px]">
+                        <td className="p-3.5 pr-4 max-w-[340px]">
                           {hasError ? (
                             <span className="text-rose-500/80 font-mono text-[11px] italic truncate block">
                               {page.errorMessage}
                             </span>
                           ) : snippet ? (
-                            <div className="space-y-1">
-                              <div className={`text-[11px] font-mono p-2 rounded-lg border leading-tight ${
+                            <div className="space-y-1.5">
+                              {/* DOM Breadcrumb / Section context */}
+                              {snippet.domPath && (
+                                <div className={`text-[10px] flex items-center gap-1 font-sans ${isDark ? 'text-zinc-400' : 'text-slate-500'}`} title={`DOM Breadcrumb: ${snippet.domPath}`}>
+                                  <Compass className="w-3 h-3 text-blue-500 shrink-0" />
+                                  <span className="truncate font-medium">{snippet.domPath}</span>
+                                </div>
+                              )}
+
+                              {/* Main Snippet Container */}
+                              <div className={`text-[11px] font-mono p-2.5 rounded-lg border leading-relaxed ${
                                 isDark
                                   ? 'text-zinc-300 bg-zinc-950/80 border-zinc-800/80'
                                   : 'text-slate-800 bg-slate-50 border-slate-200'
                               }`}>
                                 {renderHighlightedSnippet(snippet)}
                               </div>
+
+                              {/* Footer Badges: Context Type, Found Location, Snippet Index */}
                               <div className="flex items-center justify-between gap-1 text-[10px] font-mono">
-                                <span className={snippet.location === 'raw_code' ? 'text-amber-500 font-semibold flex items-center gap-1' : 'text-emerald-500 font-semibold flex items-center gap-1'}>
-                                  {snippet.location === 'raw_code' ? <Code2 className="w-2.5 h-2.5" /> : <Eye className="w-2.5 h-2.5" />}
-                                  {snippet.location === 'raw_code' ? 'الكود الخام / البيانات المخفية' : 'ظاهر الصفحة'}
-                                </span>
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                  {snippet.contextType && (
+                                    <span className={`px-1.5 py-0.5 rounded text-[9px] font-sans font-bold border ${
+                                      snippet.contextType === 'table_row'
+                                        ? 'bg-cyan-500/15 text-cyan-500 border-cyan-500/30'
+                                        : snippet.contextType === 'key_value'
+                                        ? 'bg-purple-500/15 text-purple-500 border-purple-500/30'
+                                        : snippet.contextType === 'heading'
+                                        ? 'bg-amber-500/15 text-amber-500 border-amber-500/30'
+                                        : snippet.contextType === 'list_item'
+                                        ? 'bg-emerald-500/15 text-emerald-500 border-emerald-500/30'
+                                        : isDark ? 'bg-zinc-800 text-zinc-300 border-zinc-700' : 'bg-slate-200 text-slate-700 border-slate-300'
+                                    }`}>
+                                      {snippet.contextType === 'table_row' && 'جدول / مواصفات'}
+                                      {snippet.contextType === 'key_value' && 'مواصفة / Key-Value'}
+                                      {snippet.contextType === 'heading' && 'عنوان'}
+                                      {snippet.contextType === 'list_item' && 'قائمة'}
+                                      {snippet.contextType === 'paragraph' && 'فقرة'}
+                                      {snippet.contextType === 'sentence' && 'جملة'}
+                                      {snippet.contextType === 'raw_code' && 'SSR / كود'}
+                                      {snippet.contextType === 'general' && 'سياق عام'}
+                                    </span>
+                                  )}
+
+                                  <span className={snippet.location === 'raw_code' ? 'text-amber-500 font-semibold flex items-center gap-1' : 'text-emerald-500 font-semibold flex items-center gap-1'}>
+                                    {snippet.location === 'raw_code' ? <Code2 className="w-2.5 h-2.5" /> : <Eye className="w-2.5 h-2.5" />}
+                                    <span>{snippet.location === 'raw_code' ? 'كود خام' : 'ظاهر الصفحة'}</span>
+                                  </span>
+                                </div>
+
                                 {row.snippetTotal && row.snippetTotal > 1 && (
                                   <span className={`italic ${isDark ? 'text-amber-400/70' : 'text-amber-700'}`}>
-                                    Snippet #{row.snippetIndex}/{row.snippetTotal}
+                                    #{row.snippetIndex}/{row.snippetTotal}
                                   </span>
                                 )}
                               </div>
@@ -815,28 +853,58 @@ export const SearchResults: React.FC<SearchResultsProps> = ({
                           {allSnippets.slice(0, 4).map((snippet, idx) => (
                             <div
                               key={idx}
-                              className={`rounded-xl p-2.5 border text-xs space-y-1 ${
+                              className={`rounded-xl p-2.5 border text-xs space-y-1.5 ${
                                 isDark
                                   ? 'bg-zinc-950/80 border-zinc-800 text-zinc-300'
                                   : 'bg-slate-50 border-slate-200 text-slate-800'
                               }`}
                             >
-                              <div className="flex items-center justify-between text-[10px] font-sans font-bold">
+                              <div className="flex items-center justify-between text-[10px] font-sans font-bold flex-wrap gap-1">
                                 <span className={`inline-block px-1.5 py-0.5 rounded ${
                                   isDark ? 'bg-amber-500/20 text-amber-300' : 'bg-amber-100 text-amber-800'
                                 }`}>
                                   {snippet.keyword}
                                 </span>
-                                <span className={`px-1.5 py-0.5 rounded text-[9px] font-mono flex items-center gap-1 border ${
-                                  snippet.location === 'raw_code'
-                                    ? 'bg-amber-500/10 text-amber-500 border-amber-500/20'
-                                    : 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20'
-                                }`}>
-                                  {snippet.location === 'raw_code' ? <Code2 className="w-2.5 h-2.5" /> : <Eye className="w-2.5 h-2.5" />}
-                                  <span>{snippet.location === 'raw_code' ? 'الكود الخام / البيانات المخفية' : 'ظاهر الصفحة'}</span>
-                                </span>
+                                <div className="flex items-center gap-1">
+                                  {snippet.contextType && (
+                                    <span className={`px-1.5 py-0.2 rounded text-[9px] font-sans font-bold border ${
+                                      snippet.contextType === 'table_row'
+                                        ? 'bg-cyan-500/15 text-cyan-500 border-cyan-500/30'
+                                        : snippet.contextType === 'key_value'
+                                        ? 'bg-purple-500/15 text-purple-500 border-purple-500/30'
+                                        : snippet.contextType === 'heading'
+                                        ? 'bg-amber-500/15 text-amber-500 border-amber-500/30'
+                                        : snippet.contextType === 'list_item'
+                                        ? 'bg-emerald-500/15 text-emerald-500 border-emerald-500/30'
+                                        : isDark ? 'bg-zinc-800 text-zinc-300 border-zinc-700' : 'bg-slate-200 text-slate-700 border-slate-300'
+                                    }`}>
+                                      {snippet.contextType === 'table_row' && 'جدول / مواصفات'}
+                                      {snippet.contextType === 'key_value' && 'مواصفة / Key-Value'}
+                                      {snippet.contextType === 'heading' && 'عنوان'}
+                                      {snippet.contextType === 'list_item' && 'قائمة'}
+                                      {snippet.contextType === 'paragraph' && 'فقرة'}
+                                      {snippet.contextType === 'sentence' && 'جملة'}
+                                      {snippet.contextType === 'raw_code' && 'SSR / كود'}
+                                      {snippet.contextType === 'general' && 'سياق عام'}
+                                    </span>
+                                  )}
+                                  <span className={`px-1.5 py-0.5 rounded text-[9px] font-mono flex items-center gap-1 border ${
+                                    snippet.location === 'raw_code'
+                                      ? 'bg-amber-500/10 text-amber-500 border-amber-500/20'
+                                      : 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20'
+                                  }`}>
+                                    {snippet.location === 'raw_code' ? <Code2 className="w-2.5 h-2.5" /> : <Eye className="w-2.5 h-2.5" />}
+                                    <span>{snippet.location === 'raw_code' ? 'كود خام' : 'ظاهر'}</span>
+                                  </span>
+                                </div>
                               </div>
-                              <div className="text-[11px] leading-tight">
+                              {snippet.domPath && (
+                                <div className={`text-[10px] flex items-center gap-1 font-sans ${isDark ? 'text-zinc-400' : 'text-slate-500'}`} title={`DOM Breadcrumb: ${snippet.domPath}`}>
+                                  <Compass className="w-2.5 h-2.5 text-blue-500 shrink-0" />
+                                  <span className="truncate">{snippet.domPath}</span>
+                                </div>
+                              )}
+                              <div className="text-[11px] leading-relaxed">
                                 {renderHighlightedSnippet(snippet)}
                               </div>
                             </div>

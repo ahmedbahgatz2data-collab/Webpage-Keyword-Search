@@ -1,9 +1,11 @@
 import React from 'react';
-import { History, Download, Globe2, Sun, Moon, ExternalLink } from 'lucide-react';
+import { History, Download, Globe2, Sun, Moon, ExternalLink, FileText } from 'lucide-react';
+import { generateUserGuidePdf } from '../utils/pdfGuideGenerator';
 
 interface HeaderProps {
   onOpenHistory: () => void;
   onOpenExport: () => void;
+  onOpenGuide: () => void;
   hasResults: boolean;
   historyCount: number;
   theme: 'dark' | 'light';
@@ -13,6 +15,7 @@ interface HeaderProps {
 export const Header: React.FC<HeaderProps> = ({
   onOpenHistory,
   onOpenExport,
+  onOpenGuide,
   hasResults,
   historyCount,
   theme,
@@ -51,6 +54,20 @@ export const Header: React.FC<HeaderProps> = ({
 
         {/* Action Buttons */}
         <div className="flex items-center space-x-2 sm:space-x-3">
+          {/* User Guide Button */}
+          <button
+            onClick={onOpenGuide}
+            className={
+              theme === 'dark'
+                ? 'flex items-center space-x-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-400 border border-emerald-500/30 transition-all shadow-xs'
+                : 'flex items-center space-x-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-300 transition-all shadow-xs'
+            }
+            title="Open User Guide & PDF Download (دليل الاستخدام)"
+          >
+            <FileText className="w-3.5 h-3.5 text-emerald-500" />
+            <span className="hidden md:inline">User Guide</span>
+          </button>
+
           {/* Theme Toggle Button */}
           <button
             onClick={onToggleTheme}
