@@ -243,6 +243,19 @@ function parseHtmlContent(html: string) {
   }
 }
 
+function cleanKeywordToken(k: any): string {
+  let s = String(k || '').trim();
+  if (
+    (s.startsWith('"') && s.endsWith('"') && s.length >= 2) ||
+    (s.startsWith("'") && s.endsWith("'") && s.length >= 2) ||
+    (s.startsWith('“') && s.endsWith('”') && s.length >= 2) ||
+    (s.startsWith('«') && s.endsWith('»') && s.length >= 2)
+  ) {
+    s = s.slice(1, -1).trim();
+  }
+  return s;
+}
+
 // Function to find keyword occurrences & context snippets safely & instantaneously
 function searchKeywordsInText(
   visibleText: string,
@@ -262,7 +275,7 @@ function searchKeywordsInText(
   const maxSnippets = 30;
 
   keywords.forEach(rawKeyword => {
-    const keyword = rawKeyword.trim();
+    const keyword = cleanKeywordToken(rawKeyword);
     if (!keyword) return;
 
     const snippets: any[] = [];
@@ -569,12 +582,12 @@ app.post('/api/fetch-and-search', async (req, res) => {
     searchTargets = targets
       .map(t => ({
         url: t.rawHtml ? (t.url || 'local-file.html') : normalizeUrl(t.url || ''),
-        keywords: Array.isArray(t.keywords) ? t.keywords.map((k: any) => String(k).trim()).filter((k: string) => k.length > 0) : [],
+        keywords: Array.isArray(t.keywords) ? t.keywords.map(cleanKeywordToken).filter((k: string) => k.length > 0) : [],
         rawHtml: t.rawHtml
       }))
       .filter(t => t.url.length > 0 && (t.rawHtml || t.url.startsWith('http://') || t.url.startsWith('https://')) && t.keywords.length > 0);
   } else if (Array.isArray(urls) && urls.length > 0 && Array.isArray(keywords) && keywords.length > 0) {
-    const cleanKw = keywords.map((k: any) => String(k).trim()).filter((k: string) => k.length > 0);
+    const cleanKw = keywords.map(cleanKeywordToken).filter((k: string) => k.length > 0);
     searchTargets = urls
       .map(u => normalizeUrl(u))
       .filter(u => u.length > 0 && (u.startsWith('http://') || u.startsWith('https://')))

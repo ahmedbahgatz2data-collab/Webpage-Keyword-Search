@@ -24,6 +24,7 @@ import {
 } from 'lucide-react';
 import { SearchOptions, PresetSample } from '../types';
 import { SAMPLE_PRESETS } from '../data/presets';
+import { splitKeywords } from '../utils/keywordParser';
 
 interface UrlTargetItem {
   id: string;
@@ -192,11 +193,8 @@ export const SearchControls: React.FC<SearchControlsProps> = ({
     const inputVal = (targetKwInputs[id] || '').trim();
     if (!inputVal) return;
 
-    // Split input in case user entered multiple keywords (comma/semicolon/newline separated)
-    const newKws = inputVal
-      .split(/[,;\r\n\t]+/)
-      .map(k => k.trim())
-      .filter(k => k.length > 0);
+    // Use smart splitKeywords to preserve quotes and decimal codes (e.g. "AVB1,5/2/8" or AVB1,5/2/8)
+    const newKws = splitKeywords(inputVal);
 
     if (newKws.length > 0) {
       setTargets(
@@ -269,28 +267,42 @@ export const SearchControls: React.FC<SearchControlsProps> = ({
       let url = '';
       let kwString = '';
 
-      // Check delimiters in order: Tab (\t), Pipe (|), Semicolon (;), Comma (,), or Arrow (->)
+      // Check delimiters in order: Tab (\t), Pipe (|), Semicolon (;), Arrow (->), or Comma (,)
       if (trimmed.includes('\t')) {
         const parts = trimmed.split('\t');
-        url = parts[0].trim();
-        kwString = parts.slice(1).join(' ').trim();
+        url = parts[0].trim().replace(/^["']|["']$/g, '');
+        kwString = parts.slice(1).join('\t').trim();
       } else if (trimmed.includes('|')) {
         const parts = trimmed.split('|');
-        url = parts[0].trim();
-        kwString = parts.slice(1).join(' ').trim();
+        url = parts[0].trim().replace(/^["']|["']$/g, '');
+        kwString = parts.slice(1).join('|').trim();
       } else if (trimmed.includes('->')) {
         const parts = trimmed.split('->');
-        url = parts[0].trim();
-        kwString = parts.slice(1).join(' ').trim();
+        url = parts[0].trim().replace(/^["']|["']$/g, '');
+        kwString = parts.slice(1).join('->').trim();
       } else if (trimmed.includes(';')) {
         const parts = trimmed.split(';');
-        url = parts[0].trim();
-        kwString = parts.slice(1).join(' ').trim();
+        url = parts[0].trim().replace(/^["']|["']$/g, '');
+        kwString = parts.slice(1).join(';').trim();
       } else if (trimmed.includes(',')) {
-        // Handle CSV style: url, kw1 kw2 OR url, "kw1, kw2"
-        const firstCommaIndex = trimmed.indexOf(',');
-        url = trimmed.substring(0, firstCommaIndex).trim();
-        kwString = trimmed.substring(firstCommaIndex + 1).replace(/^["']|["']$/g, '').trim();
+        // Handle CSV style: url, kw1 kw2 OR "url", "kw1", "kw2"
+        if (trimmed.startsWith('"') || trimmed.startsWith("'")) {
+          const q = trimmed[0];
+          const closeQ = trimmed.indexOf(q, 1);
+          if (closeQ !== -1) {
+            url = trimmed.substring(1, closeQ).trim();
+            const remainder = trimmed.substring(closeQ + 1).trim();
+            kwString = remainder.startsWith(',') ? remainder.substring(1).trim() : remainder;
+          } else {
+            const firstCommaIndex = trimmed.indexOf(',');
+            url = trimmed.substring(0, firstCommaIndex).trim().replace(/^["']|["']$/g, '');
+            kwString = trimmed.substring(firstCommaIndex + 1).trim();
+          }
+        } else {
+          const firstCommaIndex = trimmed.indexOf(',');
+          url = trimmed.substring(0, firstCommaIndex).trim();
+          kwString = trimmed.substring(firstCommaIndex + 1).trim();
+        }
       } else {
         // Space separated if URL starts with http
         const spaceIndex = trimmed.search(/\s/);
@@ -303,13 +315,8 @@ export const SearchControls: React.FC<SearchControlsProps> = ({
         }
       }
 
-      // Format keywords from string (comma, semicolon, pipe or tab separated - preserve slashes in keywords)
-      const kws = kwString
-        ? kwString
-            .split(/[,;\t|]+/)
-            .map(k => k.trim())
-            .filter(k => k.length > 0)
-        : [];
+      // Format keywords from string with smart quote & decimal preservation
+      const kws = kwString ? splitKeywords(kwString) : [];
 
       if (url) {
         const key = normalizeUrlKey(url);
@@ -396,15 +403,12 @@ https://react.dev\tcomponent, hooks, state, JSX
     }
   };
 
-  // Global Keywords Actions (Supports multi-keyword input comma/newline/tab/pipe/semicolon separated)
+  // Global Keywords Actions (Supports multi-keyword input preserving quotes and codes like "AVB1,5/2/8")
   const handleAddGlobalKeyword = () => {
     const trimmed = globalKwInput.trim();
     if (!trimmed) return;
 
-    const newKws = trimmed
-      .split(/[,;\r\n\t|]+/)
-      .map(k => k.trim())
-      .filter(k => k.length > 0);
+    const newKws = splitKeywords(trimmed);
 
     if (newKws.length > 0) {
       const combined = Array.from(new Set([...globalKeywords, ...newKws]));
@@ -417,10 +421,7 @@ https://react.dev\tcomponent, hooks, state, JSX
     const trimmed = globalBulkText.trim();
     if (!trimmed) return;
 
-    const newKws = trimmed
-      .split(/[,;\r\n\t|]+/)
-      .map(k => k.trim())
-      .filter(k => k.length > 0);
+    const newKws = splitKeywords(trimmed);
 
     if (newKws.length > 0) {
       const combined = Array.from(new Set([...globalKeywords, ...newKws]));
@@ -445,14 +446,7 @@ https://react.dev\tcomponent, hooks, state, JSX
 
     let activeKws = [...globalKeywords];
     if (activeKws.length === 0 && globalBulkText.trim()) {
-      activeKws = Array.from(
-        new Set(
-          globalBulkText
-            .split(/[,;\r\n\t|]+/)
-            .map(k => k.trim())
-            .filter(k => k.length > 0)
-        )
-      );
+      activeKws = Array.from(new Set(splitKeywords(globalBulkText)));
       setGlobalKeywords(activeKws);
     }
 
@@ -534,24 +528,38 @@ https://react.dev\tcomponent, hooks, state, JSX
 
           if (trimmed.includes('\t')) {
             const parts = trimmed.split('\t');
-            url = parts[0].trim();
-            kwString = parts.slice(1).join(' ').trim();
+            url = parts[0].trim().replace(/^["']|["']$/g, '');
+            kwString = parts.slice(1).join('\t').trim();
           } else if (trimmed.includes('|')) {
             const parts = trimmed.split('|');
-            url = parts[0].trim();
-            kwString = parts.slice(1).join(' ').trim();
+            url = parts[0].trim().replace(/^["']|["']$/g, '');
+            kwString = parts.slice(1).join('|').trim();
           } else if (trimmed.includes('->')) {
             const parts = trimmed.split('->');
-            url = parts[0].trim();
-            kwString = parts.slice(1).join(' ').trim();
+            url = parts[0].trim().replace(/^["']|["']$/g, '');
+            kwString = parts.slice(1).join('->').trim();
           } else if (trimmed.includes(';')) {
             const parts = trimmed.split(';');
-            url = parts[0].trim();
-            kwString = parts.slice(1).join(' ').trim();
+            url = parts[0].trim().replace(/^["']|["']$/g, '');
+            kwString = parts.slice(1).join(';').trim();
           } else if (trimmed.includes(',')) {
-            const firstCommaIndex = trimmed.indexOf(',');
-            url = trimmed.substring(0, firstCommaIndex).trim();
-            kwString = trimmed.substring(firstCommaIndex + 1).replace(/^["']|["']$/g, '').trim();
+            if (trimmed.startsWith('"') || trimmed.startsWith("'")) {
+              const q = trimmed[0];
+              const closeQ = trimmed.indexOf(q, 1);
+              if (closeQ !== -1) {
+                url = trimmed.substring(1, closeQ).trim();
+                const remainder = trimmed.substring(closeQ + 1).trim();
+                kwString = remainder.startsWith(',') ? remainder.substring(1).trim() : remainder;
+              } else {
+                const firstCommaIndex = trimmed.indexOf(',');
+                url = trimmed.substring(0, firstCommaIndex).trim().replace(/^["']|["']$/g, '');
+                kwString = trimmed.substring(firstCommaIndex + 1).trim();
+              }
+            } else {
+              const firstCommaIndex = trimmed.indexOf(',');
+              url = trimmed.substring(0, firstCommaIndex).trim();
+              kwString = trimmed.substring(firstCommaIndex + 1).trim();
+            }
           } else {
             const spaceIndex = trimmed.search(/\s/);
             if (spaceIndex !== -1) {
@@ -568,10 +576,7 @@ https://react.dev\tcomponent, hooks, state, JSX
           }
 
           if (kwString) {
-            const kws = kwString
-              .split(/[,;\t|]+/)
-              .map(k => k.trim())
-              .filter(k => k.length > 0);
+            const kws = splitKeywords(kwString);
             kws.forEach(k => kwSet.add(k));
           }
         });
@@ -652,14 +657,7 @@ https://react.dev\tcomponent, hooks, state, JSX
 
       let activeKws = [...globalKeywords];
       if (activeKws.length === 0 && globalBulkText.trim()) {
-        activeKws = Array.from(
-          new Set(
-            globalBulkText
-              .split(/[,;\r\n\t|]+/)
-              .map(k => k.trim())
-              .filter(k => k.length > 0)
-          )
-        );
+        activeKws = Array.from(new Set(splitKeywords(globalBulkText)));
         setGlobalKeywords(activeKws);
       }
 
@@ -1052,7 +1050,7 @@ https://react.dev\tcomponent, hooks, state, JSX
                               handleAddTargetKeyword(target.id);
                             }
                           }}
-                          placeholder="Add keyword for this URL..."
+                          placeholder='Add keyword (e.g. "AVB1,5/2/8")...'
                           className={
                             isDark
                               ? "flex-1 bg-zinc-900 border border-zinc-800 rounded-lg px-2.5 py-1 text-xs font-mono text-zinc-200 placeholder-zinc-600 outline-none focus:border-amber-500"
@@ -1239,19 +1237,12 @@ https://react.dev\tcomponent, hooks, state, JSX
                 onChange={(e) => {
                   const val = e.target.value;
                   setGlobalBulkText(val);
-                  const parsed = Array.from(
-                    new Set(
-                      val
-                        .split(/[,;\r\n\t|]+/)
-                        .map(k => k.trim())
-                        .filter(k => k.length > 0)
-                    )
-                  );
+                  const parsed = Array.from(new Set(splitKeywords(val)));
                   setGlobalKeywords(parsed);
                   setSelectedPresetId(null);
                 }}
                 rows={4}
-                placeholder="Enter or paste global keywords (separated by commas, newlines, semicolons, tabs, or pipes)...&#10;e.g. neural network, artificial intelligence, 24-6337-7601"
+                placeholder='Enter or paste global keywords (separated by commas, newlines, semicolons, tabs, or pipes)...&#10;e.g. "AVB1,5/2/8", neural network, 24-6337-7601 (use quotes for exact codes with commas)'
                 className={
                   isDark
                     ? "w-full rounded-xl border border-zinc-800 bg-zinc-950 p-3 text-xs sm:text-sm font-mono text-zinc-200 placeholder-zinc-600 focus:border-indigo-500 outline-none transition-all resize-y min-h-[100px]"
