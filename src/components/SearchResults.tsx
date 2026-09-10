@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { PageResult, Snippet } from '../types';
+import { buildFlexibleKeywordPattern } from '../utils/keywordParser';
 import {
   ExternalLink,
   Copy,
@@ -125,13 +126,15 @@ export const SearchResults: React.FC<SearchResultsProps> = ({
     const kw = snippet.keyword;
     if (!kw) return <span>{text}</span>;
 
-    const escapedKw = kw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const parts = text.split(new RegExp(`(${escapedKw})`, 'gi'));
+    const patternStr = buildFlexibleKeywordPattern(kw);
+    const splitRegex = new RegExp(`(${patternStr})`, 'gi');
+    const testRegex = new RegExp(`^${patternStr}$`, 'i');
+    const parts = text.split(splitRegex);
 
     return (
       <span className="leading-relaxed">
         {parts.map((part, i) => {
-          if (part.toLowerCase() === kw.toLowerCase()) {
+          if (testRegex.test(part)) {
             return (
               <mark
                 key={i}

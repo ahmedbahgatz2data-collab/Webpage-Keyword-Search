@@ -22,7 +22,7 @@ function normalizeUrl(urlStr: string): string {
   return trimmed;
 }
 
-// Helper to clean noise and decode common HTML entities
+// Helper to clean noise and decode common HTML entities (single-line normalized)
 function cleanNoise(text: string): string {
   if (!text) return '';
   return text
@@ -44,9 +44,51 @@ function cleanNoise(text: string): string {
     .trim();
 }
 
+// Helper to clean noise and decode HTML entities while preserving linebreaks (\n)
+function cleanTextPreservingLines(text: string): string {
+  if (!text) return '';
+  return text
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
+    .replace(/&#x27;/gi, "'")
+    .replace(/&ndash;/gi, '–')
+    .replace(/&mdash;/gi, '—')
+    .replace(/&[a-z0-9#]+;/gi, ' ')
+    .replace(/[\u200B-\u200D\uFEFF]/g, '') // Remove zero-width characters
+    .replace(/\\"/g, '"')
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
+    .replace(/[ \t]+/g, ' ') // Collapse horizontal spaces/tabs on the same line
+    .replace(/[ \t]*\n+[ \t]*/g, '\n') // Normalize newlines
+    .trim();
+}
+
 // Helper to escape regex special characters
 function escapeRegExp(string: string) {
   return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+// Builds regex pattern with flexible spacing between letters and numbers (Space-Insensitive)
+function buildFlexibleKeywordPattern(keyword: string): string {
+  let escaped = escapeRegExp(keyword);
+  const letterChar = '[a-zA-Z\\u0600-\\u06FF]';
+  const digitChar = '[0-9\\u0660-\\u0669]';
+
+  // Letter followed by optional whitespace followed by digit -> allow optional whitespace
+  escaped = escaped.replace(new RegExp(`(${letterChar})\\s*(${digitChar})`, 'g'), '$1\\s*$2');
+
+  // Digit followed by optional whitespace followed by letter -> allow optional whitespace
+  escaped = escaped.replace(new RegExp(`(${digitChar})\\s*(${letterChar})`, 'g'), '$1\\s*$2');
+
+  // Remaining whitespace (between words or between numbers) matches one or more whitespace
+  escaped = escaped.replace(/\s+/g, '\\s+');
+
+  return escaped;
 }
 
 export interface StructuralBlock {
@@ -65,51 +107,63 @@ function extractSentenceBoundarySnippet(
   if (!fullText) return { text: '', matchIndexInSnippet: 0 };
 
   const textLength = fullText.length;
-  const sentencePunctuation = /[.!?؛。\n\r]/;
+  const isLineBreak = (ch: string) => ch === '\n' || ch === '\r';
+  const isSentencePunctuation = (ch: string) => /[.!?؛。]/.test(ch);
 
-  // Search backwards for sentence boundary or whitespace
+  // Search backwards for line break or sentence boundary
   const lookbackLimit = Math.max(0, matchIndex - Math.floor(contextLength * 1.5));
   let sentenceStart = -1;
 
   for (let i = matchIndex - 1; i >= lookbackLimit; i--) {
-    if (sentencePunctuation.test(fullText[i])) {
+    const ch = fullText[i];
+    if (isLineBreak(ch) || isSentencePunctuation(ch)) {
       sentenceStart = i + 1;
       break;
     }
   }
 
+  let truncatedStart = false;
   if (sentenceStart === -1) {
     const spaceIndex = fullText.lastIndexOf(' ', Math.max(0, matchIndex - contextLength));
     sentenceStart = spaceIndex !== -1 ? spaceIndex + 1 : Math.max(0, matchIndex - contextLength);
+    truncatedStart = true;
   }
 
   while (sentenceStart < matchIndex && /\s/.test(fullText[sentenceStart])) {
     sentenceStart++;
   }
 
-  // Search forwards for sentence boundary or whitespace
+  // Search forwards for line break or sentence boundary
   const lookforwardLimit = Math.min(textLength, matchIndex + matchLength + Math.floor(contextLength * 1.5));
   let sentenceEnd = -1;
 
   for (let i = matchIndex + matchLength; i < lookforwardLimit; i++) {
-    if (sentencePunctuation.test(fullText[i])) {
-      sentenceEnd = i + 1;
+    const ch = fullText[i];
+    if (isLineBreak(ch)) {
+      sentenceEnd = i;
+      break;
+    }
+    if (isSentencePunctuation(ch)) {
+      sentenceEnd = i + 1; // Include ending punctuation mark
       break;
     }
   }
 
+  let truncatedEnd = false;
   if (sentenceEnd === -1) {
     const spaceIndex = fullText.indexOf(' ', Math.min(textLength, matchIndex + matchLength + contextLength));
     sentenceEnd = spaceIndex !== -1 ? spaceIndex : Math.min(textLength, matchIndex + matchLength + contextLength);
+    truncatedEnd = true;
   }
 
   let snippetText = fullText.substring(sentenceStart, sentenceEnd).trim();
   snippetText = cleanNoise(snippetText);
 
-  if (sentenceStart > 0 && !snippetText.startsWith('...')) {
+  // Only add '...' if we actually truncated mid-sentence/mid-line without reaching a natural boundary!
+  if (truncatedStart && sentenceStart > 0 && !snippetText.startsWith('...')) {
     snippetText = '...' + snippetText;
   }
-  if (sentenceEnd < textLength && !snippetText.endsWith('...')) {
+  if (truncatedEnd && sentenceEnd < textLength && !snippetText.endsWith('...')) {
     snippetText = snippetText + '...';
   }
 
@@ -201,10 +255,10 @@ function parseHtmlContent(html: string) {
     });
 
     // Extract Headings
-    $('h1, h2, h3, h4').slice(0, 30).each((_, hEl) => {
+    $('h1, h2, h3, h4, h5, h6').slice(0, 100).each((_, hEl) => {
       const hText = cleanNoise($(hEl).text());
       const tag = (hEl as any).tagName?.toUpperCase() || 'H';
-      if (hText && hText.length > 2 && hText.length < 150) {
+      if (hText && hText.length > 2 && hText.length < 200) {
         blocks.push({
           text: hText,
           domPath: `Heading (${tag})`,
@@ -213,10 +267,14 @@ function parseHtmlContent(html: string) {
       }
     });
 
-    // 4. Remove scripts/styles & clean visible text
+    // 4. Remove scripts/styles & clean visible text while preserving block boundaries
     $('script, style, noscript, svg, canvas, template, iframe, object, embed').remove();
-    const visibleText = cleanNoise($('body').text() || $.root().text());
-    const combinedText = (visibleText + ' ' + extractedJsonText).trim();
+    $('br, hr').replaceWith('\n');
+    $('p, div, h1, h2, h3, h4, h5, h6, li, tr, th, td, header, nav, section, article, aside, button, main, dt, dd, figcaption, blockquote, form, address').before('\n').after('\n');
+
+    const rawVisible = $('body').text() || $.root().text();
+    const visibleText = cleanTextPreservingLines(rawVisible);
+    const combinedText = (cleanNoise(visibleText) + ' ' + extractedJsonText).trim();
     const wordCount = combinedText.split(/\s+/).filter(w => w.length > 0).length;
 
     return {
@@ -291,10 +349,10 @@ function searchKeywordsInText(
       } else if (options.exactPhrase) {
         pattern = new RegExp(escapeRegExp(keyword), flags);
       } else {
-        pattern = new RegExp(escapeRegExp(keyword), flags);
+        pattern = new RegExp(buildFlexibleKeywordPattern(keyword), flags);
       }
     } catch {
-      pattern = new RegExp(escapeRegExp(keyword), flags);
+      pattern = new RegExp(buildFlexibleKeywordPattern(keyword), flags);
     }
 
     // 1. Check structural blocks first (Tables, Key-Values, Headings)
@@ -304,7 +362,7 @@ function searchKeywordsInText(
         const blockPattern = new RegExp(pattern.source, pattern.flags);
         const match = blockPattern.exec(block.text);
         if (match) {
-          const matchIdx = block.text.toLowerCase().indexOf(keyword.toLowerCase());
+          const matchIdx = match.index;
           snippets.push({
             id: `snip-${keyword}-${snippets.length}-block`,
             keyword,
@@ -388,7 +446,8 @@ function searchKeywordsInText(
             if (start > 0) snippetText = '...' + snippetText;
             if (end < jsonText.length) snippetText = snippetText + '...';
 
-            const matchIdx = snippetText.toLowerCase().indexOf(keyword.toLowerCase());
+            const matchedStr = match[0];
+            const matchIdx = snippetText.toLowerCase().indexOf(matchedStr.toLowerCase());
 
             snippets.push({
               id: `snip-${keyword}-${snippets.length}-${matchIndex}-json`,

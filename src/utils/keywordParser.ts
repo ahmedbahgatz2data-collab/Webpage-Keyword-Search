@@ -107,3 +107,27 @@ export function splitKeywords(raw: string): string[] {
     .map(k => k.replace(/^["'“”«»]+|["'“”«»]+$/g, '').trim())
     .filter(k => k.length > 0);
 }
+
+/**
+ * Builds a regex pattern string that allows flexible whitespace between letters and digits (Space-Insensitive).
+ * For example:
+ * - "HLD110-500/16" matches "HLD110-500/16" and "HLD 110-500/16"
+ * - "HLD 110-500/16" matches "HLD 110-500/16" and "HLD110-500/16"
+ * - "neural network" matches "neural network", but NOT "neuralnetwork" (words stay separated)
+ */
+export function buildFlexibleKeywordPattern(keyword: string): string {
+  let escaped = keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const letterChar = '[a-zA-Z\\u0600-\\u06FF]';
+  const digitChar = '[0-9\\u0660-\\u0669]';
+
+  // Letter followed by optional whitespace followed by digit -> allow optional whitespace
+  escaped = escaped.replace(new RegExp(`(${letterChar})\\s*(${digitChar})`, 'g'), '$1\\s*$2');
+
+  // Digit followed by optional whitespace followed by letter -> allow optional whitespace
+  escaped = escaped.replace(new RegExp(`(${digitChar})\\s*(${letterChar})`, 'g'), '$1\\s*$2');
+
+  // Remaining whitespace (between words or between numbers) matches one or more whitespace
+  escaped = escaped.replace(/\s+/g, '\\s+');
+
+  return escaped;
+}
