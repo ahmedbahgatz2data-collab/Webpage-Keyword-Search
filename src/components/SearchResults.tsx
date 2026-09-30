@@ -28,7 +28,9 @@ import {
   X,
   FileQuestion,
   Trash2,
-  Compass
+  Compass,
+  RotateCcw,
+  RefreshCw
 } from 'lucide-react';
 
 interface SearchResultsProps {
@@ -39,6 +41,8 @@ interface SearchResultsProps {
   onAiAnalyze: (page: PageResult) => void;
   onToggleHideResults?: () => void;
   onClearResults?: () => void;
+  onRetryFailed?: (specificUrls?: string[]) => void;
+  isScanning?: boolean;
   theme?: 'dark' | 'light';
 }
 
@@ -50,6 +54,8 @@ export const SearchResults: React.FC<SearchResultsProps> = ({
   onAiAnalyze,
   onToggleHideResults,
   onClearResults,
+  onRetryFailed,
+  isScanning = false,
   theme = 'dark'
 }) => {
   const isDark = theme === 'dark';
@@ -228,13 +234,27 @@ export const SearchResults: React.FC<SearchResultsProps> = ({
               </span>
             </div>
           </div>
-          <button
-            onClick={() => setFilterStatus('error')}
-            className="px-3 py-1.5 rounded-lg bg-rose-500 text-white font-bold hover:bg-rose-600 transition-colors shrink-0 text-xs flex items-center gap-1.5"
-          >
-            <XCircle className="w-3.5 h-3.5" />
-            Show Failed URLs ({failedPagesCount})
-          </button>
+          <div className="flex items-center gap-2">
+            {onRetryFailed && (
+              <button
+                type="button"
+                onClick={() => onRetryFailed()}
+                disabled={isScanning}
+                className="px-3.5 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-zinc-950 font-bold transition-all shrink-0 text-xs flex items-center gap-1.5 shadow-sm disabled:opacity-50"
+                title="إعادة محاولة جميع الروابط التي فشلت"
+              >
+                <RotateCcw className={`w-3.5 h-3.5 ${isScanning ? 'animate-spin' : ''}`} />
+                <span>Retry All Failed ({failedPagesCount})</span>
+              </button>
+            )}
+            <button
+              onClick={() => setFilterStatus('error')}
+              className="px-3 py-1.5 rounded-lg bg-rose-500 text-white font-bold hover:bg-rose-600 transition-colors shrink-0 text-xs flex items-center gap-1.5"
+            >
+              <XCircle className="w-3.5 h-3.5" />
+              Show Failed URLs ({failedPagesCount})
+            </button>
+          </div>
         </div>
       )}
 
@@ -526,9 +546,28 @@ export const SearchResults: React.FC<SearchResultsProps> = ({
                         {/* 3. Status */}
                         <td className="p-3.5 font-mono">
                           {hasError ? (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-500/10 text-rose-500 border border-rose-500/20">
-                              <XCircle className="w-3 h-3" />
-                              Error
+                            <div className="flex flex-col items-start gap-1">
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-500/10 text-rose-500 border border-rose-500/20">
+                                <XCircle className="w-3 h-3" />
+                                Error
+                              </span>
+                              {onRetryFailed && (
+                                <button
+                                  type="button"
+                                  onClick={() => onRetryFailed([page.url])}
+                                  disabled={isScanning}
+                                  className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-500/15 hover:bg-amber-500/25 text-amber-500 border border-amber-500/30 transition-colors disabled:opacity-50"
+                                  title="إعادة محاولة هذا الرابط"
+                                >
+                                  <RotateCcw className={`w-2.5 h-2.5 ${isScanning ? 'animate-spin' : ''}`} />
+                                  <span>Retry</span>
+                                </button>
+                              )}
+                            </div>
+                          ) : page.status === 'fetching' ? (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-500/10 text-blue-500 border border-blue-500/20">
+                              <RefreshCw className="w-3 h-3 animate-spin" />
+                              Scanning...
                             </span>
                           ) : (
                             <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-600 border border-emerald-500/20">
@@ -820,9 +859,23 @@ export const SearchResults: React.FC<SearchResultsProps> = ({
                       <div className={`p-3.5 rounded-xl border space-y-1.5 ${
                         isDark ? 'bg-rose-950/60 border-rose-500/40 text-rose-300' : 'bg-rose-100/90 border-rose-300 text-rose-900'
                       }`}>
-                        <div className="flex items-center gap-2 font-bold text-xs text-rose-500">
-                          <AlertTriangle className="w-4 h-4 shrink-0" />
-                          <span>Fetch & Scan Failed</span>
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2 font-bold text-xs text-rose-500">
+                            <AlertTriangle className="w-4 h-4 shrink-0" />
+                            <span>Fetch & Scan Failed</span>
+                          </div>
+                          {onRetryFailed && (
+                            <button
+                              type="button"
+                              onClick={() => onRetryFailed([page.url])}
+                              disabled={isScanning}
+                              className="px-2.5 py-1 rounded-lg text-xs font-bold bg-amber-500 hover:bg-amber-400 text-zinc-950 flex items-center gap-1.5 transition-all shadow-xs disabled:opacity-50"
+                              title="إعادة محاولة هذا الرابط"
+                            >
+                              <RotateCcw className={`w-3 h-3 ${isScanning ? 'animate-spin' : ''}`} />
+                              <span>Retry URL</span>
+                            </button>
+                          )}
                         </div>
                         <p className="text-xs leading-relaxed font-mono opacity-95 break-words">
                           {page.errorMessage || 'HTTP Error: Webpage could not be fetched or loaded.'}

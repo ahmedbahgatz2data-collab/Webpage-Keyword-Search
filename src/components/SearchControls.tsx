@@ -20,7 +20,9 @@ import {
   Square,
   XCircle,
   ShieldCheck,
-  Sparkles
+  Sparkles,
+  Timer,
+  Clock
 } from 'lucide-react';
 import { SearchOptions, PresetSample } from '../types';
 import { SAMPLE_PRESETS } from '../data/presets';
@@ -36,12 +38,23 @@ interface UrlTargetItem {
 
 interface SearchControlsProps {
   onSearch: (
-    searchData: { targets?: { url: string; keywords: string[] }[]; urls?: string[]; keywords?: string[] },
+    searchData: {
+      targets?: { url: string; keywords: string[]; rawHtml?: string; isLocalHtml?: boolean }[];
+      urls?: string[];
+      keywords?: string[];
+    },
     options: SearchOptions
   ) => void;
   isLoading: boolean;
   isPaused?: boolean;
-  scanProgress?: { current: number; total: number; currentUrl?: string } | null;
+  scanProgress?: {
+    current: number;
+    total: number;
+    currentUrl?: string;
+    isWaitingDelay?: boolean;
+    delayRemainingSec?: number;
+    isCompleted?: boolean;
+  } | null;
   onPauseScan?: () => void;
   onResumeScan?: () => void;
   onStopScan?: () => void;
@@ -67,51 +80,81 @@ export const SearchControls: React.FC<SearchControlsProps> = ({
   const [showBulkText, setShowBulkText] = useState<boolean>(false);
   const [showFileUpload, setShowFileUpload] = useState<boolean>(false);
   const [showHtmlUpload, setShowHtmlUpload] = useState<boolean>(false);
+  const [htmlUploadKeywords, setHtmlUploadKeywords] = useState<string>('');
+  const [isDraggingHtml, setIsDraggingHtml] = useState<boolean>(false);
   const [importStatus, setImportStatus] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const htmlFileInputRef = useRef<HTMLInputElement>(null);
 
-  const handleHtmlFilesUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (!files || files.length === 0) return;
+  const handleProcessHtmlFiles = async (fileList: FileList | File[]) => {
+    if (!fileList || fileList.length === 0) return;
 
-    let processedCount = 0;
+    const files = Array.from(fileList);
     const newTargets: UrlTargetItem[] = [];
 
-    Array.from(files).forEach((fileItem, idx) => {
-      const file = fileItem as File;
-      const reader = new FileReader();
-      reader.onload = (evt) => {
-        const content = evt.target?.result as string;
-        if (content) {
-          const titleMatch = content.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
-          const fileTitle = titleMatch ? titleMatch[1].replace(/[\r\n\t]+/g, ' ').trim() : file.name;
+    // Parse keywords from htmlUploadKeywords or globalKeywords
+    let targetKeywords: string[] = [];
+    if (htmlUploadKeywords.trim()) {
+      targetKeywords = splitKeywords(htmlUploadKeywords.trim());
+    } else if (globalKeywords.length > 0) {
+      targetKeywords = [...globalKeywords];
+    }
 
-          const kws = globalKeywords.length > 0 ? [...globalKeywords] : ['search'];
-
-          newTargets.push({
-            id: `html-file-${Date.now()}-${idx}-${Math.random()}`,
-            url: `file://${file.name} (${fileTitle})`,
-            keywords: kws,
-            rawHtml: content,
-            isLocalHtml: true
+    for (let idx = 0; idx < files.length; idx++) {
+      const file = files[idx];
+      try {
+        let content = '';
+        if (typeof file.text === 'function') {
+          content = await file.text();
+        } else {
+          content = await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve((reader.result as string) || '');
+            reader.onerror = () => reject(reader.error);
+            reader.readAsText(file);
           });
-
-          processedCount++;
-          if (processedCount === files.length) {
-            setTargets(prev => [...prev, ...newTargets]);
-            setSearchMode('mapped');
-            setShowHtmlUpload(false);
-            const totalKeywords = newTargets.reduce((sum, t) => sum + t.keywords.length, 0);
-            setImportStatus(`Successfully uploaded ${newTargets.length} local HTML file(s) with ${totalKeywords} mapped keywords. Ready to scan!`);
-          }
         }
-      };
-      reader.readAsText(file);
-    });
 
-    if (htmlFileInputRef.current) htmlFileInputRef.current.value = '';
+        const titleMatch = content.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+        const fileTitle = titleMatch ? titleMatch[1].replace(/[\r\n\t]+/g, ' ').trim() : file.name;
+
+        newTargets.push({
+          id: `html-file-${Date.now()}-${idx}-${Math.random().toString(36).slice(2, 7)}`,
+          url: `file://${file.name}${fileTitle && fileTitle !== file.name ? ` (${fileTitle})` : ''}`,
+          keywords: targetKeywords.length > 0 ? [...targetKeywords] : [],
+          rawHtml: content,
+          isLocalHtml: true
+        });
+      } catch (err) {
+        console.error('Failed to read local HTML file:', file.name, err);
+      }
+    }
+
+    if (newTargets.length > 0) {
+      setTargets(prev => [...prev, ...newTargets]);
+      setSearchMode('mapped');
+      setShowHtmlUpload(false);
+      setImportStatus(
+        `تم بنجاح رفع ${newTargets.length} ملف HTML محلي جاهز للفحص. ${
+          targetKeywords.length > 0
+            ? `تم ربط ${targetKeywords.length} كلمة مفتاحية (${targetKeywords.join(', ')}).`
+            : 'يمكنك إدخال الكلمات المفتاحية الآن والبدء بالبحث.'
+        }`
+      );
+    } else {
+      alert('لم يتم التمكن من قراءة أي ملفات HTML صالحة. تأكد من اختيار ملفات بصيغة .html أو .htm');
+    }
+
+    if (htmlFileInputRef.current) {
+      htmlFileInputRef.current.value = '';
+    }
+  };
+
+  const handleHtmlFilesUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files.length > 0) {
+      handleProcessHtmlFiles(e.target.files);
+    }
   };
 
   // Global State - Empty Defaults
@@ -132,8 +175,12 @@ export const SearchControls: React.FC<SearchControlsProps> = ({
     exactPhrase: true,
     useRegex: false,
     contextLength: 90,
-    stealthMode: true
+    stealthMode: true,
+    delayBetweenRequestsMs: 0
   });
+
+  const [delayPreset, setDelayPreset] = useState<string>('0');
+  const [customDelaySec, setCustomDelaySec] = useState<string>('0');
 
   const [selectedPresetId, setSelectedPresetId] = useState<string | null>(null);
 
@@ -889,32 +936,84 @@ https://react.dev\tcomponent, hooks, state, JSX
                       Select one or multiple local HTML files to analyze and search keywords against instantly.
                     </p>
                   </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowHtmlUpload(false)}
+                    className="p-1 text-zinc-500 hover:text-zinc-300 transition-colors text-sm font-bold"
+                  >
+                    &times;
+                  </button>
+                </div>
+
+                {/* Pre-mapped Keywords Input (Optional) */}
+                <div className="space-y-1.5">
+                  <label className={isDark ? "text-zinc-300 font-semibold flex items-center gap-1.5" : "text-slate-700 font-semibold flex items-center gap-1.5"}>
+                    <KeyRound className="w-3.5 h-3.5 text-amber-500" />
+                    <span>Keywords to search in these HTML files (optional):</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={htmlUploadKeywords}
+                    onChange={(e) => setHtmlUploadKeywords(e.target.value)}
+                    placeholder='e.g. HLD110-500/16, model, sensor, specifications (comma-separated)...'
+                    className={
+                      isDark
+                        ? "w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2 text-xs font-mono text-zinc-200 placeholder-zinc-600 outline-none focus:border-blue-500"
+                        : "w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-mono text-slate-800 placeholder-slate-400 outline-none focus:border-blue-500"
+                    }
+                  />
+                  <p className={isDark ? "text-[11px] text-zinc-500" : "text-[11px] text-slate-500"}>
+                    If provided, these keywords will automatically be mapped to all uploaded HTML files. You can also edit keywords per file anytime.
+                  </p>
                 </div>
 
                 {/* Dropzone input */}
-                <div className={
-                  isDark
-                    ? "border-2 border-dashed border-blue-500/30 hover:border-blue-500/60 rounded-xl p-6 text-center bg-zinc-900/50 hover:bg-zinc-900 transition-all cursor-pointer"
-                    : "border-2 border-dashed border-blue-500/40 hover:border-blue-500/70 rounded-xl p-6 text-center bg-white hover:bg-blue-50/50 transition-all cursor-pointer"
-                }>
+                <div
+                  onClick={() => htmlFileInputRef.current?.click()}
+                  onDragOver={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setIsDraggingHtml(true);
+                  }}
+                  onDragLeave={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setIsDraggingHtml(false);
+                  }}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setIsDraggingHtml(false);
+                    if (e.dataTransfer?.files && e.dataTransfer.files.length > 0) {
+                      handleProcessHtmlFiles(e.dataTransfer.files);
+                    }
+                  }}
+                  className={`border-2 border-dashed rounded-xl p-6 text-center transition-all cursor-pointer ${
+                    isDraggingHtml
+                      ? 'border-blue-500 bg-blue-500/10 scale-[1.01]'
+                      : isDark
+                      ? 'border-blue-500/30 hover:border-blue-500/60 bg-zinc-900/50 hover:bg-zinc-900'
+                      : 'border-blue-500/40 hover:border-blue-500/70 bg-white hover:bg-blue-50/50'
+                  }`}
+                >
                   <input
                     ref={htmlFileInputRef}
                     type="file"
-                    accept=".html,.htm"
+                    accept=".html,.htm,text/html,.HTML,.HTM"
                     multiple
                     onChange={handleHtmlFilesUpload}
                     className="hidden"
                     id="html-files-file-input"
                   />
-                  <label htmlFor="html-files-file-input" className="cursor-pointer block space-y-2">
-                    <Code2 className="w-8 h-8 mx-auto text-blue-500 opacity-80" />
+                  <div className="space-y-2 pointer-events-none">
+                    <Code2 className={`w-8 h-8 mx-auto text-blue-500 ${isDraggingHtml ? 'animate-bounce' : 'opacity-80'}`} />
                     <div className={isDark ? "text-sm font-bold text-zinc-200" : "text-sm font-bold text-slate-800"}>
-                      Click to choose or drop local .html / .htm files
+                      {isDraggingHtml ? 'Drop HTML files here now!' : 'Click to choose or drop local .html / .htm files'}
                     </div>
                     <div className={isDark ? "text-zinc-500 text-[11px]" : "text-slate-500 text-[11px]"}>
-                      Files will be added as target pages with mapped keywords automatically
+                      Supports individual .html files or multiple files at once
                     </div>
-                  </label>
+                  </div>
                 </div>
               </div>
             )}
@@ -1097,6 +1196,18 @@ https://react.dev\tcomponent, hooks, state, JSX
                 💡 <strong>Global Keywords Mode:</strong> Enter URLs & Keywords, then search across all URLs or convert them into specific URL-Keyword Mapped targets without running search.
               </div>
               <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSearchMode('mapped');
+                    setShowHtmlUpload(true);
+                  }}
+                  className="px-3 py-1.5 rounded-lg text-xs font-mono font-bold bg-blue-500/20 hover:bg-blue-500/30 text-blue-400 border border-blue-500/30 shadow-xs transition-all flex items-center gap-1.5"
+                  title="Upload local .html or .htm files"
+                >
+                  <Code2 className="w-3.5 h-3.5" />
+                  <span>Upload Local HTML Files</span>
+                </button>
                 <button
                   type="button"
                   onClick={() => setShowGlobalFileUpload(!showGlobalFileUpload)}
@@ -1346,6 +1457,70 @@ https://react.dev\tcomponent, hooks, state, JSX
                 <option value={150}>Long (150 chars)</option>
               </select>
             </div>
+
+            {/* Delay Between Requests Setting */}
+            <div
+              className={isDark ? "flex items-center gap-1.5 pl-2 border-l border-zinc-800" : "flex items-center gap-1.5 pl-2 border-l border-slate-200"}
+              title="تحديد وقت فاصل بين كل رابط والآخر لتجنب الحظر (Rate Limiting / 429 Too Many Requests)"
+            >
+              <Timer className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+              <span className={isDark ? "text-zinc-400 font-medium" : "text-slate-600 font-medium"}>
+                Delay:
+              </span>
+              <select
+                value={delayPreset}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setDelayPreset(val);
+                  if (val !== 'custom') {
+                    setOptions({ ...options, delayBetweenRequestsMs: Number(val) });
+                  } else {
+                    const num = parseFloat(customDelaySec) || 1;
+                    setOptions({ ...options, delayBetweenRequestsMs: Math.round(num * 1000) });
+                  }
+                }}
+                className={
+                  isDark
+                    ? "rounded-md border border-zinc-800 bg-zinc-950 px-2 py-0.5 text-xs text-zinc-200 focus:border-blue-500 outline-none font-mono"
+                    : "rounded-md border border-slate-300 bg-slate-100 px-2 py-0.5 text-xs text-slate-800 focus:border-blue-500 outline-none font-mono"
+                }
+              >
+                <option value="0">0s (No Delay / Fast)</option>
+                <option value="500">0.5s</option>
+                <option value="1000">1.0s (Recommended)</option>
+                <option value="2000">2.0s (Safe)</option>
+                <option value="3000">3.0s (Anti-Block)</option>
+                <option value="5000">5.0s (Strict)</option>
+                <option value="custom">Custom...</option>
+              </select>
+
+              {delayPreset === 'custom' && (
+                <div className="flex items-center gap-1">
+                  <input
+                    type="number"
+                    min="0"
+                    max="60"
+                    step="0.5"
+                    value={customDelaySec}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      setCustomDelaySec(v);
+                      const num = parseFloat(v);
+                      if (!isNaN(num) && num >= 0) {
+                        setOptions({ ...options, delayBetweenRequestsMs: Math.round(num * 1000) });
+                      }
+                    }}
+                    placeholder="1"
+                    className={
+                      isDark
+                        ? "w-12 rounded-md border border-zinc-800 bg-zinc-950 px-1.5 py-0.5 text-xs text-zinc-200 focus:border-blue-500 outline-none font-mono"
+                        : "w-12 rounded-md border border-slate-300 bg-slate-100 px-1.5 py-0.5 text-xs text-slate-800 focus:border-blue-500 outline-none font-mono"
+                    }
+                  />
+                  <span className={isDark ? "text-zinc-500 text-[11px]" : "text-slate-400 text-[11px]"}>s</span>
+                </div>
+              )}
+            </div>
           </div>
 
           {/* Action Row & Progressive Progress Bar */}
@@ -1422,23 +1597,70 @@ https://react.dev\tcomponent, hooks, state, JSX
           </div>
         </div>
 
-        {/* Scanning Progress Details Bar */}
-        {isLoading && scanProgress && (
-          <div className="mt-3 p-3 bg-zinc-950 rounded-xl border border-blue-500/30 space-y-2 animate-in fade-in duration-150 font-mono text-xs">
-            <div className="flex items-center justify-between text-zinc-300 font-medium">
+        {/* Scanning Progress Details Bar - Remains visible after completion */}
+        {scanProgress && (
+          <div
+            className={`mt-3 p-3 rounded-xl border space-y-2 animate-in fade-in duration-150 font-mono text-xs transition-colors ${
+              !isLoading && (scanProgress.isCompleted || scanProgress.current >= scanProgress.total)
+                ? isDark
+                  ? 'bg-zinc-950 border-emerald-500/40 text-emerald-400'
+                  : 'bg-emerald-50/70 border-emerald-300 text-emerald-800'
+                : isDark
+                ? 'bg-zinc-950 border-blue-500/30 text-zinc-300'
+                : 'bg-blue-50/70 border-blue-200 text-slate-800'
+            }`}
+          >
+            <div className="flex items-center justify-between font-medium">
               <span className="flex items-center gap-2">
-                <span className={`w-2 h-2 rounded-full ${isPaused ? 'bg-amber-400' : 'bg-blue-400 animate-ping'}`} />
-                {isPaused ? 'Scan Paused' : 'Scanning Webpages'}: {scanProgress.current} of {scanProgress.total} URLs ({progressPercent}%)
+                {!isLoading && (scanProgress.isCompleted || scanProgress.current >= scanProgress.total) ? (
+                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 inline-block shrink-0" />
+                ) : (
+                  <span
+                    className={`w-2.5 h-2.5 rounded-full ${
+                      isPaused
+                        ? 'bg-amber-400'
+                        : scanProgress.isWaitingDelay
+                        ? 'bg-amber-400 animate-pulse'
+                        : 'bg-blue-400 animate-ping'
+                    }`}
+                  />
+                )}
+                {!isLoading && (scanProgress.isCompleted || scanProgress.current >= scanProgress.total) ? (
+                  <span className="font-bold flex items-center gap-1.5 text-emerald-500">
+                    <Check className="w-4 h-4" />
+                    Scan Complete: All {scanProgress.total} URLs finished (100%)
+                  </span>
+                ) : isPaused ? (
+                  'Scan Paused'
+                ) : scanProgress.isWaitingDelay ? (
+                  <span className="text-amber-400 font-bold flex items-center gap-1">
+                    <Timer className="w-3.5 h-3.5 animate-spin" />
+                    Cooldown delay ({scanProgress.delayRemainingSec ?? 1}s remaining to avoid blocks)...
+                  </span>
+                ) : (
+                  'Scanning Webpages'
+                )}
+                {isLoading || isPaused || (!scanProgress.isCompleted && scanProgress.current < scanProgress.total)
+                  ? `: ${scanProgress.current} of ${scanProgress.total} URLs (${progressPercent}%)`
+                  : ''}
               </span>
-              <span className="text-zinc-500 text-[11px] truncate max-w-[260px]">
-                {scanProgress.currentUrl}
+              <span className={isDark ? "text-zinc-500 text-[11px] truncate max-w-[260px]" : "text-slate-500 text-[11px] truncate max-w-[260px]"}>
+                {scanProgress.currentUrl || (!isLoading ? 'Completed' : '')}
               </span>
             </div>
 
-            <div className="w-full h-1.5 bg-zinc-800 rounded-full overflow-hidden">
+            <div className={`w-full h-1.5 rounded-full overflow-hidden ${isDark ? 'bg-zinc-800' : 'bg-slate-200'}`}>
               <div
-                className={`h-full transition-all duration-300 ${isPaused ? 'bg-amber-400' : 'bg-blue-500'}`}
-                style={{ width: `${progressPercent}%` }}
+                className={`h-full transition-all duration-300 ${
+                  !isLoading && (scanProgress.isCompleted || scanProgress.current >= scanProgress.total)
+                    ? 'bg-emerald-500'
+                    : isPaused
+                    ? 'bg-amber-400'
+                    : scanProgress.isWaitingDelay
+                    ? 'bg-amber-500'
+                    : 'bg-blue-500'
+                }`}
+                style={{ width: `${!isLoading && (scanProgress.isCompleted || scanProgress.current >= scanProgress.total) ? 100 : progressPercent}%` }}
               />
             </div>
           </div>

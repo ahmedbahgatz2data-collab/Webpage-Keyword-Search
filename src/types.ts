@@ -6,6 +6,7 @@ export interface SearchOptions {
   stealthMode?: boolean; // Anti-bot / modern Chrome browser headers bypass mode
   autoDownload?: boolean; // Automatically download CSV report upon scan completion
   smartContext?: boolean; // Sentence boundary, Table row key-value, DOM breadcrumb, noise stripping
+  delayBetweenRequestsMs?: number; // Delay between consecutive URL requests (in ms) to avoid rate limits/blocks
 }
 
 export interface Snippet {
@@ -41,6 +42,8 @@ export interface PageResult {
   keywordMatches: Record<string, KeywordMatch>;
   textContent?: string;
   fetchTimeMs: number;
+  rawHtml?: string;
+  isLocalHtml?: boolean;
 }
 
 export interface UrlKeywordTarget {

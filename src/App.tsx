@@ -8,7 +8,7 @@ import { SearchHistoryModal } from './components/SearchHistoryModal';
 import { ExportModal } from './components/ExportModal';
 import { UserGuideModal } from './components/UserGuideModal';
 import { PageResult, SearchOptions, SearchHistoryItem } from './types';
-import { AlertCircle, Sparkles, Globe, KeyRound, Eye, EyeOff, Trash2 } from 'lucide-react';
+import { AlertCircle, Sparkles, Globe, KeyRound, Eye, EyeOff, Trash2, RotateCcw } from 'lucide-react';
 
 const LOCAL_STORAGE_HISTORY_KEY = 'webpage_keyword_search_history_v1';
 
@@ -40,9 +40,16 @@ export default function App() {
   // Scanning & Pause / Resume State
   const [isScanning, setIsScanning] = useState<boolean>(false);
   const [isPaused, setIsPaused] = useState<boolean>(false);
-  const [scanProgress, setScanProgress] = useState<{ current: number; total: number; currentUrl?: string } | null>(null);
+  const [scanProgress, setScanProgress] = useState<{
+    current: number;
+    total: number;
+    currentUrl?: string;
+    isWaitingDelay?: boolean;
+    delayRemainingSec?: number;
+    isCompleted?: boolean;
+  } | null>(null);
 
-  // Results View/Hide Toggle
+  // Results View/Hide Toggle - Default hidden
   const [showResults, setShowResults] = useState<boolean>(false);
 
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -60,6 +67,14 @@ export default function App() {
   // Refs for scan control
   const isPausedRef = useRef<boolean>(false);
   const stopScanningRef = useRef<boolean>(false);
+  const lastSearchOptionsRef = useRef<SearchOptions>({
+    matchCase: false,
+    exactPhrase: true,
+    useRegex: false,
+    contextLength: 90,
+    stealthMode: true,
+    delayBetweenRequestsMs: 0
+  });
 
   useEffect(() => {
     try {
@@ -118,6 +133,7 @@ export default function App() {
     isPausedRef.current = false;
     setIsPaused(false);
     setIsScanning(false);
+    setScanProgress(prev => (prev ? { ...prev, isWaitingDelay: false, isCompleted: true } : null));
   };
 
   // Automatic CSV Export on Scan Completion
@@ -212,20 +228,26 @@ export default function App() {
     link.click();
   };
 
-  // Main Search Execution (Supports Progressive Scan + Pause / Resume)
+  // Main Search Execution (Supports Progressive Scan + Pause / Resume + Configurable Delays)
   const handleExecuteSearch = async (
-    searchData: { targets?: { url: string; keywords: string[] }[]; urls?: string[]; keywords?: string[] },
+    searchData: {
+      targets?: { url: string; keywords: string[]; rawHtml?: string; isLocalHtml?: boolean }[];
+      urls?: string[];
+      keywords?: string[];
+    },
     options: SearchOptions
   ) => {
     const startTime = Date.now();
+    lastSearchOptionsRef.current = options;
     setIsScanning(true);
     setIsPaused(false);
     setErrorMessage(null);
+    setShowResults(false);
 
     isPausedRef.current = false;
     stopScanningRef.current = false;
 
-    let targetList: Array<{ url: string; keywords: string[] }> = [];
+    let targetList: Array<{ url: string; keywords: string[]; rawHtml?: string; isLocalHtml?: boolean }> = [];
     let allKeywords: string[] = [];
     let allUrls: string[] = [];
 
@@ -249,10 +271,44 @@ export default function App() {
       return;
     }
 
+    setScanProgress({
+      current: 0,
+      total: targetList.length,
+      currentUrl: targetList[0]?.url,
+      isWaitingDelay: false,
+      isCompleted: false
+    });
+
     setResults([]);
     let accumulatedResults: PageResult[] = [];
 
     for (let i = 0; i < targetList.length; i++) {
+      if (stopScanningRef.current) break;
+
+      // Rate-limiting delay between requests to avoid getting blocked
+      const delayMs = options.delayBetweenRequestsMs ?? 0;
+      if (i > 0 && delayMs > 0) {
+        const delayStart = Date.now();
+        while (Date.now() - delayStart < delayMs) {
+          if (stopScanningRef.current) break;
+          while (isPausedRef.current) {
+            if (stopScanningRef.current) break;
+            await new Promise(res => setTimeout(res, 150));
+          }
+          if (stopScanningRef.current) break;
+          const elapsed = Date.now() - delayStart;
+          const remaining = Math.max(0, Math.ceil((delayMs - elapsed) / 100) / 10);
+          setScanProgress({
+            current: i + 1,
+            total: targetList.length,
+            currentUrl: targetList[i].url,
+            isWaitingDelay: true,
+            delayRemainingSec: remaining
+          });
+          await new Promise(res => setTimeout(res, 100));
+        }
+      }
+
       if (stopScanningRef.current) break;
 
       // Handle Pause state
@@ -264,7 +320,12 @@ export default function App() {
       if (stopScanningRef.current) break;
 
       const currentTarget = targetList[i];
-      setScanProgress({ current: i + 1, total: targetList.length, currentUrl: currentTarget.url });
+      setScanProgress({
+        current: i + 1,
+        total: targetList.length,
+        currentUrl: currentTarget.url,
+        isWaitingDelay: false
+      });
 
       const controller = new AbortController();
       const abortTimeout = setTimeout(() => controller.abort(), 20000); // 20s overall safety abort
@@ -316,7 +377,13 @@ export default function App() {
 
     setIsScanning(false);
     setIsPaused(false);
-    setScanProgress(null);
+    setScanProgress({
+      current: targetList.length,
+      total: targetList.length,
+      currentUrl: undefined,
+      isWaitingDelay: false,
+      isCompleted: true
+    });
 
     const totalMatches = accumulatedResults.reduce((acc: number, p: PageResult) => acc + (p.totalMatches || 0), 0);
     saveSearchToHistory(allUrls, allKeywords, totalMatches, accumulatedResults.length);
@@ -326,10 +393,174 @@ export default function App() {
     }
   };
 
+  // Retry Failed URLs (either all failed or specific list)
+  const handleRetryFailed = async (specificUrls?: string[]) => {
+    if (isScanning) return;
+
+    // Filter failed pages
+    const failedPages = results.filter(
+      p => p.status === 'error' && (!specificUrls || specificUrls.includes(p.url))
+    );
+
+    if (failedPages.length === 0) return;
+
+    const opts = lastSearchOptionsRef.current || {
+      matchCase: false,
+      exactPhrase: true,
+      useRegex: false,
+      contextLength: 90,
+      stealthMode: true,
+      delayBetweenRequestsMs: 0
+    };
+
+    const targetList = failedPages.map(p => ({
+      url: p.url,
+      keywords: p.targetKeywords && p.targetKeywords.length > 0 ? p.targetKeywords : currentKeywords,
+      rawHtml: p.rawHtml,
+      isLocalHtml: p.isLocalHtml
+    }));
+
+    setIsScanning(true);
+    setIsPaused(false);
+    setErrorMessage(null);
+    setShowResults(false);
+
+    isPausedRef.current = false;
+    stopScanningRef.current = false;
+
+    setScanProgress({
+      current: 0,
+      total: targetList.length,
+      currentUrl: targetList[0]?.url,
+      isWaitingDelay: false,
+      isCompleted: false
+    });
+
+    // Mark retrying pages as 'fetching'
+    const retryingUrls = new Set(targetList.map(t => t.url));
+    setResults(prev =>
+      prev.map(p => (retryingUrls.has(p.url) ? { ...p, status: 'fetching', errorMessage: undefined } : p))
+    );
+
+    for (let i = 0; i < targetList.length; i++) {
+      if (stopScanningRef.current) break;
+
+      const delayMs = opts.delayBetweenRequestsMs ?? 0;
+      if (i > 0 && delayMs > 0) {
+        const delayStart = Date.now();
+        while (Date.now() - delayStart < delayMs) {
+          if (stopScanningRef.current) break;
+          while (isPausedRef.current) {
+            if (stopScanningRef.current) break;
+            await new Promise(res => setTimeout(res, 150));
+          }
+          if (stopScanningRef.current) break;
+          const elapsed = Date.now() - delayStart;
+          const remaining = Math.max(0, Math.ceil((delayMs - elapsed) / 100) / 10);
+          setScanProgress({
+            current: i + 1,
+            total: targetList.length,
+            currentUrl: targetList[i].url,
+            isWaitingDelay: true,
+            delayRemainingSec: remaining
+          });
+          await new Promise(res => setTimeout(res, 100));
+        }
+      }
+
+      if (stopScanningRef.current) break;
+
+      while (isPausedRef.current) {
+        if (stopScanningRef.current) break;
+        await new Promise(res => setTimeout(res, 200));
+      }
+
+      if (stopScanningRef.current) break;
+
+      const currentTarget = targetList[i];
+      setScanProgress({
+        current: i + 1,
+        total: targetList.length,
+        currentUrl: currentTarget.url,
+        isWaitingDelay: false
+      });
+
+      const controller = new AbortController();
+      const abortTimeout = setTimeout(() => controller.abort(), 20000);
+
+      try {
+        const response = await fetch('/api/fetch-and-search', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          signal: controller.signal,
+          body: JSON.stringify({
+            targets: [currentTarget],
+            options: opts
+          })
+        });
+
+        clearTimeout(abortTimeout);
+
+        if (!response.ok) {
+          const errJson = await response.json().catch(() => ({}));
+          throw new Error(errJson.error || `Error scanning ${currentTarget.url}`);
+        }
+
+        const data = await response.json();
+        const updatedPage: PageResult = (data.results && data.results[0]) || {
+          url: currentTarget.url,
+          title: currentTarget.url,
+          status: 'error',
+          errorMessage: 'No data returned',
+          targetKeywords: currentTarget.keywords,
+          foundKeywords: [],
+          notFoundKeywords: currentTarget.keywords,
+          keywordMatches: {},
+          wordCount: 0,
+          totalMatches: 0,
+          fetchTimeMs: 0
+        };
+
+        setResults(prev =>
+          prev.map(p => (p.url === currentTarget.url ? updatedPage : p))
+        );
+      } catch (err: any) {
+        clearTimeout(abortTimeout);
+        console.error('Retry scan error:', err);
+        const fallbackErrorResult: PageResult = {
+          url: currentTarget.url,
+          title: currentTarget.url,
+          status: 'error',
+          errorMessage: err.name === 'AbortError' ? 'Scan timed out after 20 seconds' : (err.message || 'Failed to scan webpage'),
+          targetKeywords: currentTarget.keywords,
+          foundKeywords: [],
+          notFoundKeywords: currentTarget.keywords,
+          keywordMatches: {},
+          wordCount: 0,
+          totalMatches: 0,
+          fetchTimeMs: 0
+        };
+        setResults(prev =>
+          prev.map(p => (p.url === currentTarget.url ? fallbackErrorResult : p))
+        );
+      }
+    }
+
+    setIsScanning(false);
+    setIsPaused(false);
+    setScanProgress({
+      current: targetList.length,
+      total: targetList.length,
+      currentUrl: undefined,
+      isWaitingDelay: false,
+      isCompleted: true
+    });
+  };
+
   const handleRestoreSearch = (historyItem: SearchHistoryItem) => {
     handleExecuteSearch(
       { urls: historyItem.urls, keywords: historyItem.keywords, targets: historyItem.targets },
-      { matchCase: false, exactPhrase: true, useRegex: false, contextLength: 90 }
+      { matchCase: false, exactPhrase: true, useRegex: false, contextLength: 90, delayBetweenRequestsMs: 0 }
     );
   };
 
@@ -395,11 +626,29 @@ export default function App() {
             </div>
 
             <div className="flex items-center gap-2">
+              {results.some(p => p.status === 'error') && (
+                <button
+                  type="button"
+                  onClick={() => handleRetryFailed()}
+                  disabled={isScanning}
+                  className={
+                    isDark
+                      ? "px-3 py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-400 font-semibold transition-all flex items-center gap-1.5 border border-amber-500/30 text-xs disabled:opacity-50"
+                      : "px-3 py-1.5 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-700 font-semibold transition-all flex items-center gap-1.5 border border-amber-300 text-xs disabled:opacity-50"
+                  }
+                  title="إعادة محاولة الروابط التي فشلت"
+                >
+                  <RotateCcw className={`w-3.5 h-3.5 ${isScanning ? 'animate-spin' : ''}`} />
+                  <span>Retry Failed ({results.filter(p => p.status === 'error').length})</span>
+                </button>
+              )}
+
               <button
                 onClick={() => {
                   setResults([]);
                   setShowResults(false);
                   setSearchTimeMs(0);
+                  setScanProgress(null);
                 }}
                 className={isDark ? 'px-3 py-1.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-rose-400 hover:text-rose-300 font-semibold transition-all flex items-center gap-1.5 border border-zinc-700' : 'px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-rose-600 hover:text-rose-700 font-semibold transition-all flex items-center gap-1.5 border border-slate-300'}
                 title="Clear all search results"
@@ -441,7 +690,10 @@ export default function App() {
               setResults([]);
               setShowResults(false);
               setSearchTimeMs(0);
+              setScanProgress(null);
             }}
+            onRetryFailed={handleRetryFailed}
+            isScanning={isScanning}
             theme={theme}
           />
         )}
